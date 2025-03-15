@@ -1,0 +1,49 @@
+import torch
+import os
+import torchvision.transforms as transforms
+# --- Data ---
+DATA_DIR = 'jetbot_data'
+IMAGE_DIR = os.path.join(DATA_DIR, 'images')
+CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
+IMAGE_SIZE = 224
+NUM_PREV_FRAMES = 4
+
+# --- Training ---
+BATCH_SIZE = 4
+LEARNING_RATE = 1e-4
+NUM_EPOCHS = 10000  # Probably don't need this in the testing notebook
+NUM_TIMESTEPS = 1000
+BETA_START = 1e-4
+BETA_END = 0.02
+USE_FP16 = True
+ACCUMULATION_STEPS = 4
+START_EPOCH = 0
+LOAD_CHECKPOINT = None
+# --- Output ---
+SAVE_MODEL_EVERY = 1000
+SAMPLE_EVERY = 100
+PLOT_EVERY = 100
+OUTPUT_DIR = 'output_action_conditioned_224_4prevframes'
+CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
+SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
+PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
+TEST_SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'test_samples')
+
+## --- Create Directories ---
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(SAMPLE_DIR, exist_ok=True)
+os.makedirs(PLOT_DIR, exist_ok=True)
+os.makedirs(TEST_SAMPLE_DIR, exist_ok=True)
+# --- Device ---
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# --- Diffusion Schedule ---
+# You can also store the schedule type here, for maximum consistency:
+SCHEDULE_TYPE = 'linear'  # Or 'cosine'
+
+TRANSFORM = transforms.Compose([
+    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
