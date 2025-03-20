@@ -2,7 +2,7 @@ import torch
 import os
 import torchvision.transforms as transforms
 # --- Data ---
-DATA_DIR = 'jetbot_data'
+DATA_DIR = 'data_collection_test'
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
 IMAGE_SIZE = 224
@@ -30,6 +30,8 @@ PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
 TEST_SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'test_samples')
 
 ## --- Create Directories ---
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(IMAGE_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(SAMPLE_DIR, exist_ok=True)
