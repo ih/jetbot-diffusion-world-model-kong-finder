@@ -23,11 +23,12 @@ LOAD_CHECKPOINT = None
 SAVE_MODEL_EVERY = 1000
 SAMPLE_EVERY = 100
 PLOT_EVERY = 100
-OUTPUT_DIR = 'output_action_conditioned_224_4prevframes'
+OUTPUT_DIR = 'output_two_action_224'
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
 TEST_SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'test_samples')
+SPLIT_DATASET_FILENAME = 'dataset_split.pth'
 
 ## --- Create Directories ---
 os.makedirs(DATA_DIR, exist_ok=True)
