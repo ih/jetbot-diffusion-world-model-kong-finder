@@ -1,4 +1,5 @@
 .ipynb_checkpoints/
 output*
-jetbot_data*
+jetbot_data/
+jetbot_data_two_actions/
 __pycache__/
