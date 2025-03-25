@@ -11,7 +11,7 @@ NUM_PREV_FRAMES = 4
 # --- Training ---
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-4
-NUM_EPOCHS = 10000  # Probably don't need this in the testing notebook
+NUM_EPOCHS = 15  # Probably don't need this in the testing notebook
 NUM_TIMESTEPS = 1000
 BETA_START = 1e-4
 BETA_END = 0.02
@@ -20,16 +20,18 @@ ACCUMULATION_STEPS = 4
 START_EPOCH = 0
 LOAD_CHECKPOINT = None
 # --- Output ---
-SAVE_MODEL_EVERY = 1000
-SAMPLE_EVERY = 100
-PLOT_EVERY = 100
-OUTPUT_DIR = 'output_two_action_224_early_stoppage'
+SAVE_MODEL_EVERY = 5
+SAMPLE_EVERY = 5
+PLOT_EVERY = 5
+OUTPUT_DIR = 'output_two_action_datset_refactor_test'
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
 TEST_SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'test_samples')
 SPLIT_DATASET_FILENAME = 'dataset_split.pth'
-
+EARLY_STOPPING_PATIENCE = 5
+EARLY_STOPPING_PERCENTAGE = .1
+MIN_EPOCHS = 5
 ## --- Create Directories ---
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
