@@ -2,4 +2,5 @@
 output*
 jetbot_data/
 jetbot_data_two_actions/
+jetbot_session_data_two_actions/
 __pycache__/

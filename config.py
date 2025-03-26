@@ -2,6 +2,7 @@ import torch
 import os
 import torchvision.transforms as transforms
 # --- Data ---
+SESSION_DATA_DIR = 'jetbot_session_data_two_actions'
 DATA_DIR = 'jetbot_data_two_actions'
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
@@ -33,6 +34,7 @@ EARLY_STOPPING_PATIENCE = 5
 EARLY_STOPPING_PERCENTAGE = .1
 MIN_EPOCHS = 5
 ## --- Create Directories ---
+os.makedirs(SESSION_DATA_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
