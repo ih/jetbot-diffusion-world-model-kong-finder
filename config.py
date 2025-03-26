@@ -12,7 +12,7 @@ NUM_PREV_FRAMES = 4
 # --- Training ---
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-4
-NUM_EPOCHS = 15  # Probably don't need this in the testing notebook
+NUM_EPOCHS = 1000  # Probably don't need this in the testing notebook
 NUM_TIMESTEPS = 1000
 BETA_START = 1e-4
 BETA_END = 0.02
@@ -21,10 +21,10 @@ ACCUMULATION_STEPS = 4
 START_EPOCH = 0
 LOAD_CHECKPOINT = None
 # --- Output ---
-SAVE_MODEL_EVERY = 5
-SAMPLE_EVERY = 5
-PLOT_EVERY = 5
-OUTPUT_DIR = 'output_two_action_datset_refactor_test'
+SAVE_MODEL_EVERY = 100
+SAMPLE_EVERY = 10
+PLOT_EVERY = 10
+OUTPUT_DIR = 'output_two_action_sessions_dataset'
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
