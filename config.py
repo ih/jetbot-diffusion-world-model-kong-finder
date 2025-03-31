@@ -6,7 +6,7 @@ SESSION_DATA_DIR = 'jetbot_session_data_two_actions'
 DATA_DIR = 'jetbot_data_two_actions'
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
-IMAGE_SIZE = 224
+IMAGE_SIZE = 128
 NUM_PREV_FRAMES = 4
 
 # --- Training ---
@@ -19,9 +19,9 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 4
 START_EPOCH = 0
-OUTPUT_DIR = 'output_two_action_model_v2_test'
+OUTPUT_DIR = 'output_two_action_model_v2_128image'
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
-LOAD_CHECKPOINT = os.path.join(CHECKPOINT_DIR, 'model_best_epoch_45.pth')
+LOAD_CHECKPOINT = os.path.join(CHECKPOINT_DIR, 'model_best_epoch_32.pth')
 # --- Output ---
 SAVE_MODEL_EVERY = 100
 SAMPLE_EVERY = 1
