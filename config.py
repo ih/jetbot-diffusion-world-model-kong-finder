@@ -19,9 +19,9 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 4
 START_EPOCH = 0
-OUTPUT_DIR = 'output_two_action_model_v2_128image'
+OUTPUT_DIR = 'output_two_action_model_v2_test'
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
-LOAD_CHECKPOINT = os.path.join(CHECKPOINT_DIR, 'model_best_epoch_58.pth')
+LOAD_CHECKPOINT = os.path.join(CHECKPOINT_DIR, 'model_best_epoch_116.pth')
 # --- Output ---
 SAVE_MODEL_EVERY = 100
 SAMPLE_EVERY = 1
