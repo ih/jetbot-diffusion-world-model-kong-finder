@@ -15,27 +15,27 @@ MODEL_ARCHITECTURE = 'SimpleUNetV1' # Name matching a class in models.py
 # --- Training ---
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-4
-NUM_EPOCHS = 3  # Probably don't need this in the testing notebook
+NUM_EPOCHS = 1000  # Probably don't need this in the testing notebook
 NUM_TIMESTEPS = 1000
 BETA_START = 1e-4
 BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 4
 START_EPOCH = 0
-OUTPUT_DIR = 'output_models_file_test'
+OUTPUT_DIR = 'output_model_small_session_split_data'
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
 # --- Output ---
-SAVE_MODEL_EVERY = 1
+SAVE_MODEL_EVERY = 100
 SAMPLE_EVERY = 1
-PLOT_EVERY = 1
+PLOT_EVERY = 10
 SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
 TEST_SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'test_samples')
 SPLIT_DATASET_FILENAME = 'dataset_split.pth'
 EARLY_STOPPING_PATIENCE = 5
 EARLY_STOPPING_PERCENTAGE = .1
-MIN_EPOCHS = 1
+MIN_EPOCHS = 5
 ## --- Create Directories ---
 os.makedirs(SESSION_DATA_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
