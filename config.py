@@ -6,7 +6,7 @@ SESSION_DATA_DIR = 'jetbot_session_data_two_actions'
 DATA_DIR = 'jetbot_data_two_actions'
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
-IMAGE_SIZE = 128
+IMAGE_SIZE = 224
 NUM_PREV_FRAMES = 4
 
 # --- Model ---
