@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import config
 
 # --- Common Blocks (Keep these defined once) ---
 class SinusoidalPositionEmbeddings(nn.Module):
@@ -137,11 +138,54 @@ class SimpleUNetV2_Larger(nn.Module): # Your current larger model
 
 # --- Add more architectures here as needed (e.g., UNetWithAttention) ---
 
+class SimpleRewardEstimator(nn.Module):
+    # MODIFIED: Takes input_channels=3 (single RGB frame)
+    def __init__(self, input_channels=3, image_size=config.IMAGE_SIZE):
+        super().__init__()
+        self.input_channels = input_channels
+        self.image_size = image_size
+
+        # Simple CNN architecture example
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(input_channels, 32, kernel_size=3, stride=2, padding=1), # Output: size/2
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1), # Output: size/4
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1), # Output: size/8
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # Output: size/16
+            nn.ReLU(),
+            nn.BatchNorm2d(256),
+            nn.AdaptiveAvgPool2d((1, 1)) # Global average pooling
+        )
+
+        conv_output_size = 256 # Because of AdaptiveAvgPool2d
+
+        self.fc_layers = nn.Sequential(
+            nn.Linear(conv_output_size, 128),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(128, 1) # Output a single reward value
+        )
+
+    # MODIFIED: Takes single image tensor x_image
+    def forward(self, x_image):
+        # x_image shape: (batch_size, 3, image_size, image_size)
+        x = self.conv_layers(x_image)
+        x = torch.flatten(x, 1) # Flatten all dimensions except batch
+        reward = self.fc_layers(x)
+        return reward
+
+
 # --- Optional: Model Factory ---
 # This dictionary maps names (used in config) to classes
 MODEL_REGISTRY = {
     'SimpleUNetV1': SimpleUNetV1,
     'SimpleUNetV2_Larger': SimpleUNetV2_Larger,
+    'SimpleRewardEstimator': SimpleRewardEstimator,
     # Add other models here
 }
 

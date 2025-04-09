@@ -10,6 +10,8 @@ IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
 IMAGE_SIZE = 224
 NUM_PREV_FRAMES = 4
+MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_subset.csv") 
+
 
 # --- Model ---
 MODEL_ARCHITECTURE = 'SimpleUNetV1' # Name matching a class in models.py
@@ -24,7 +26,7 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 4
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIDR, 'output_model_small_session_split_data')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
 # --- Output ---
@@ -38,6 +40,9 @@ SPLIT_DATASET_FILENAME = 'dataset_split.pth'
 EARLY_STOPPING_PATIENCE = 5
 EARLY_STOPPING_PERCENTAGE = .1
 MIN_EPOCHS = 5
+
+
+
 ## --- Create Directories ---
 os.makedirs(SESSION_DATA_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
