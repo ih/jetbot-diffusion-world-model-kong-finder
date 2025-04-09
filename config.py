@@ -1,9 +1,11 @@
 import torch
 import os
 import torchvision.transforms as transforms
+# Keep data and output in a separate directory to make uploading code to Gemini easier
+AUXILIARY_DIR = r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux'
 # --- Data ---
-SESSION_DATA_DIR = 'jetbot_session_data_two_actions'
-DATA_DIR = 'jetbot_data_two_actions'
+SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_session_data_two_actions')
+DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
 IMAGE_SIZE = 224
@@ -22,7 +24,7 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 4
 START_EPOCH = 0
-OUTPUT_DIR = 'output_model_small_session_split_data'
+OUTPUT_DIR = os.path.join(AUXILIARY_DIDR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
 # --- Output ---
