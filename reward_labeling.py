@@ -7,7 +7,7 @@
 get_ipython().system('pip install ipyevents')
 
 
-# In[2]:
+# In[1]:
 
 
 import torch
@@ -38,7 +38,7 @@ with Notebook():
     from jetbot_dataset import JetbotDataset, load_train_test_split # Import load_train_test_split if needed
 
 
-# In[3]:
+# In[2]:
 
 
 # --- Configuration ---
@@ -53,6 +53,10 @@ OUTPUT_REWARD_CSV = config.MANUAL_COLLECTED_REWARD_CSV # Changed output filename
 USE_SUBSET = "train" # Options: None, "train", "test"
 DATASET_SPLIT_FILENAME = config.SPLIT_DATASET_FILENAME # Ensure this is defined in config
 
+basic_transform = transforms.Compose([
+    transforms.ToTensor()
+])
+
 # --- Load Full Dataset (Needed for accessing original dataframe regardless of subset) ---
 # We won't apply the normalization transform here, just load PIL images
 full_dataset_for_metadata = JetbotDataset(
@@ -60,7 +64,7 @@ full_dataset_for_metadata = JetbotDataset(
     data_dir=AGGREGATE_DATA_DIR,
     image_size=DISPLAY_IMAGE_SIZE,
     num_prev_frames=NUM_PREV_FRAMES,
-    transform=None # Load PIL images directly for display
+    transform=basic_transform # Load PIL images directly for display
 )
 
 # --- Load the Dataset for Labeling (Full or Subset) ---
@@ -469,4 +473,10 @@ if len(labeling_dataset) > 0:
     display(ui) # Display the main UI container
 else:
      print("Cannot display UI because the labeling dataset is empty.")
+
+
+# In[ ]:
+
+
+
 
