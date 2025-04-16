@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[9]:
+# In[1]:
 
 
 import torch
@@ -28,13 +28,7 @@ with Notebook():
     from action_conditioned_diffusion_world_model_gemini import forward_diffusion_sample, linear_beta_schedule, cosine_beta_schedule, get_index_from_list  # Import necessary functions
 
 
-# In[7]:
-
-
-from gym import spaces
-
-
-# In[13]:
+# In[3]:
 
 
 class JetbotSimEnv(gym.Env):
@@ -282,6 +276,8 @@ class JetbotSimEnv(gym.Env):
 
         # Sample a random valid starting point from the real dataset
         random_start_idx = random.randint(0, len(self.real_dataset) - 1)
+        # for debugging
+        random_start_idx = 928
         current_frame, _, prev_frames = self.real_dataset[random_start_idx]
 
         # Initialize internal state tensors (add batch dimension and move to device)
@@ -330,7 +326,7 @@ class JetbotSimEnv(gym.Env):
 
 
 
-# In[17]:
+# In[6]:
 
 
 # --- Example Usage (Optional) ---
@@ -345,11 +341,13 @@ if __name__ == '__main__':
     for step in range(env.max_steps):
         # action = env.action_space.sample() # Sample random action
         action = 1
-        print(f"Step: {step+1}, Action: {action}")
+        
         obs, reward, done, info = env.step(action)
         # print(f"  Observation Shape: {obs.shape}, Reward: {reward:.4f}, Done: {done}")
         total_reward += reward
-        env.render(mode='human') # Can uncomment to show frames (might open many windows)
+        if (step == 0 or step == env.max_steps-1):
+            print(f"Step: {step+1}, Action: {action}")
+            env.render(mode='human') # Can uncomment to show frames (might open many windows)
         # time.sleep(0.5) # Slow down visualization
         if done:
             break

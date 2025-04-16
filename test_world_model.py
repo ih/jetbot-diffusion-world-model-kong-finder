@@ -1,19 +1,19 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[6]:
+# In[1]:
 
 
 get_ipython().system('pip install importnb')
 
 
-# In[7]:
+# In[2]:
 
 
 get_ipython().system('pip install scikit-image')
 
 
-# In[1]:
+# In[3]:
 
 
 import torch
@@ -38,7 +38,7 @@ with Notebook():
     from jetbot_dataset import *
 
 
-# In[3]:
+# In[4]:
 
 
 def evaluate_model_quantitative(model, test_dataloader, betas, alphas_cumprod, num_timesteps, device, num_prev_frames, action_tolerance=1e-6):
@@ -225,7 +225,7 @@ def evaluate_model_quantitative(model, test_dataloader, betas, alphas_cumprod, n
     return avg_metrics
 
 
-# In[2]:
+# In[5]:
 
 
 # --- Helper Function for Displaying PIL Images in Subplots ---
@@ -384,7 +384,7 @@ def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
     return Subset(input_dataset, filtered_indices)
 
 
-# In[3]:
+# In[6]:
 
 
 # --- Automatic Checkpoint Loading Logic ---
@@ -476,7 +476,7 @@ else:
     print(f"Model Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
 
-# In[4]:
+# In[7]:
 
 
 model.eval()
@@ -502,25 +502,25 @@ dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, con
 train_dataset, test_dataset = load_train_test_split(dataset, config.SPLIT_DATASET_FILENAME)
 
 
-# In[11]:
+# In[10]:
 
 
 target_action = .1
 test_dataset_action_0_1 = filter_dataset_by_action(test_dataset, target_action)
 
 
-# In[17]:
+# In[ ]:
 
 
 target_action = 0
 test_dataset_action_0 = filter_dataset_by_action(test_dataset, target_action)
 
 
-# In[21]:
+# In[11]:
 
 
-entry_indx = 475
-target_dataset = test_dataset_action_0
+entry_indx = 375
+target_dataset = test_dataset_action_0_1
 entry = target_dataset[entry_indx]
 current_tensor, _, prev_frames_tensor = entry 
 
@@ -546,13 +546,25 @@ actual = target_dataset[entry_indx+config.NUM_PREV_FRAMES]
 display_dataset_entry(actual)
 
 
-# In[22]:
+# In[14]:
 
 
-len(test_dataset)
+subset_idx = 375
+
+# --- Get the index for the original dataset ---
+test_dataset_idx = test_dataset_action_0_1.indices[subset_idx]
+original_dataset_idx = test_dataset.indices[test_dataset_idx]
+
+print(f"Index {subset_idx} in test_dataset_action_0_1 corresponds to:")
+print(f"- Index {test_dataset_idx} in test_dataset")
+print(f"- Index {original_dataset_idx} in the original dataset (relative to dataset.valid_indices)")
+
+# You can now access the item directly from the original dataset if needed:
+entry_from_original = dataset[original_dataset_idx]
+display_dataset_entry(entry_from_original)
 
 
-# In[23]:
+# In[ ]:
 
 
 if test_dataset is None:
@@ -592,135 +604,4 @@ except Exception as e:
     print(f"Error during qualitative visualization: {e}")
 
 print("Evaluation Script Finished.")
-
-
-# In[36]:
-
-
-for i in range(5):
-    entry = dataset_action_0_1[i]
-    display_dataset_entry(entry)
-
-
-# In[5]:
-
-
-dataset = JetbotDataset(config.IMAGE_DIR, config.CSV_PATH, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
-image, _, _ = dataset[25]
-
-
-# In[25]:
-
-
-image
-transforms.ToPILImage()(((image.clamp(-1, 1) + 1) / 2 * 255).type(torch.uint8)).convert("RGB")
-
-
-# In[9]:
-
-
-image_clamped = (image.clamp(-1, 1) + 1) / 2
-image_clamped
-
-
-# In[10]:
-
-
-image_255 = (image_clamped * 255).type(torch.uint8)
-image_255
-
-
-# In[37]:
-
-
-with torch.no_grad():
-        # Outer loop: Predicts one future frame per iteration
-        for step in range(num_steps):
-            # 1. Get Action for this Step:
-            #    - Selects the action from the input 'actions' tensor for the current future step.
-            #    - Adds a batch dimension (unsqueeze(0)) because the model expects batch input.
-            #    - Moves the action tensor to the correct device (CPU or GPU).
-            action = actions[step].unsqueeze(0).to(device)
-
-            # 2. Prepare for Denoising: Noise the *Current* State
-            #    - t_sample represents the maximum noise level (T-1).
-            t_sample = torch.tensor([num_timesteps - 1], device=device, dtype=torch.long)
-            #    - forward_diffusion_sample takes the *current* frame tensor
-            #      (which is either the initial frame for step 0, or the frame
-            #      predicted in the previous step) and adds the maximum amount
-            #      of noise to it, according to the diffusion schedule.
-            #    - x_noisy is now a heavily noised version of current_frame_tensor.
-            #      This serves as the starting point (x_T equivalent) for the
-            #      reverse diffusion process to predict the *next* frame.
-            x_noisy, _ = forward_diffusion_sample(current_frame_tensor, t_sample, betas, alphas_cumprod, device)
-            #    - 'x' will be iteratively denoised in the inner loop.
-            x = x_noisy
-
-            # 3. Inner Loop: Reverse Diffusion (Denoising to Predict Next Frame)
-            #    - Iterates backwards from the highest noise level (T-1) down to 1.
-            for i in reversed(range(1, num_timesteps)):
-                #    - 't' represents the current diffusion timestep in the reverse process.
-                t = (torch.ones(1) * i).long().to(device)
-
-                #    - Enable mixed precision (FP16) if configured, for potential speedup/memory saving.
-                with torch.cuda.amp.autocast(enabled=config.USE_FP16):
-                    #    - THE CORE PREDICTION: The U-Net model predicts the noise.
-                    #      Inputs:
-                    #        - x: The image at the current noise level 'i'.
-                    #        - t: The current diffusion timestep 'i'.
-                    #        - action: The specific action we want to condition this step's prediction on.
-                    #        - prev_frames_tensor: The history of frames leading up to the 'current_frame_tensor'.
-                    predicted_noise = model(x, t, action, prev_frames_tensor)
-
-                #    - Retrieve pre-calculated diffusion schedule constants for timestep 't'.
-                alpha = alphas[t][:, None, None, None]
-                alpha_hat = alphas_cumprod[t][:, None, None, None]
-                beta = betas[t][:, None, None, None]
-
-                #    - Generate random noise (except for the very last step).
-                #      This adds stochasticity to the generation process.
-                if i > 1:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = torch.zeros_like(x) # No noise added at the last step
-
-                #    - Apply the denoising formula (DDPM/DDIM step):
-                #      Uses the current noisy image 'x', the predicted_noise, and the
-                #      schedule constants to estimate the image at the *previous*
-                #      diffusion timestep (i-1). Updates 'x' in place for the next iteration.
-                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
-
-            # --- End of Inner Denoising Loop ---
-            # At this point, 'x' contains the denoised prediction for the frame
-            # at the current outer 'step', still in the normalized range [-1, 1].
-
-            # 4. Post-process the Predicted Frame:
-            #    - Clamp values to [-1, 1], un-normalize to [0, 1].
-            predicted_frame_tensor_unnorm = (x.clamp(-1, 1) + 1) / 2
-            #    - Scale to [0, 255] and convert to uint8.
-            predicted_frame_tensor_uint8 = (predicted_frame_tensor_unnorm * 255).type(torch.uint8)
-            #    - Convert the single frame in the batch [0] to a PIL Image for storage/display.
-            predicted_frame_pil = transforms.ToPILImage()(predicted_frame_tensor_uint8[0].cpu()).convert("RGB")
-            #    - Add the predicted PIL image to the list.
-            predicted_frames.append(predicted_frame_pil)
-
-            # 5. Update State for the *Next* Prediction Step:
-            #    - Convert the predicted PIL image back to a tensor [0, 1].
-            current_frame_tensor_next_step = transforms.ToTensor()(predicted_frame_pil).unsqueeze(0)
-            #    - Re-normalize the tensor back to [-1, 1] for the model input.
-            current_frame_tensor_next_step = (current_frame_tensor_next_step - 0.5) / 0.5
-            #    - Update 'current_frame_tensor' to be this newly predicted frame.
-            current_frame_tensor = current_frame_tensor_next_step.to(device)
-            #    - Update 'prev_frames_tensor' by removing the oldest frame in the stack
-            #      and appending the newly predicted 'current_frame_tensor'.
-            prev_frames_tensor = torch.cat([prev_frames_tensor[:, 3:, :, :], current_frame_tensor], dim=1)
-
-        # --- End of Outer Prediction Loop ---
-transforms.ToPILImage()(image_255).convert("RGB")
-
-
-# In[ ]:
-
-
-
 
