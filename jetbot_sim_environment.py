@@ -28,7 +28,7 @@ with Notebook():
     from action_conditioned_diffusion_world_model_gemini import forward_diffusion_sample, linear_beta_schedule, cosine_beta_schedule, get_index_from_list  # Import necessary functions
 
 
-# In[3]:
+# In[13]:
 
 
 class JetbotSimEnv(gym.Env):
@@ -276,8 +276,8 @@ class JetbotSimEnv(gym.Env):
 
         # Sample a random valid starting point from the real dataset
         random_start_idx = random.randint(0, len(self.real_dataset) - 1)
-        # for debugging
-        random_start_idx = 928
+        # index for debugging where frame has a kong and motion is predicted
+        # random_start_idx = 928
         current_frame, _, prev_frames = self.real_dataset[random_start_idx]
 
         # Initialize internal state tensors (add batch dimension and move to device)
@@ -326,13 +326,13 @@ class JetbotSimEnv(gym.Env):
 
 
 
-# In[6]:
+# In[14]:
 
 
 # --- Example Usage (Optional) ---
 if __name__ == '__main__':
     print("Testing JetbotSimEnv...")
-    env = JetbotSimEnv(max_steps=10)
+    env = JetbotSimEnv(max_steps=50)
     obs = env.reset()
 
     print("Initial Observation Shape:", obs.shape)
@@ -345,7 +345,7 @@ if __name__ == '__main__':
         obs, reward, done, info = env.step(action)
         # print(f"  Observation Shape: {obs.shape}, Reward: {reward:.4f}, Done: {done}")
         total_reward += reward
-        if (step == 0 or step == env.max_steps-1):
+        if (step == 0 or step == 10 or step == env.max_steps-1):
             print(f"Step: {step+1}, Action: {action}")
             env.render(mode='human') # Can uncomment to show frames (might open many windows)
         # time.sleep(0.5) # Slow down visualization
