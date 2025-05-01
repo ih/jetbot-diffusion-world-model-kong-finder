@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[8]:
+# In[17]:
 
 
 import time, os, random
 from types import SimpleNamespace
 
+import math
 import numpy as np
 import torch, torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -23,21 +24,21 @@ device = config.DEVICE
 print(f"Using device: {device}")
 
 
-# In[13]:
+# In[18]:
 
 
 MODE = "sim"          # "sim" or "real"
 JETBOT_IP = "192.168.1.42"
-EPISODES = 3          # used in sim mode
+EPISODES = 5          # used in sim mode
 STEPS = 5            # steps per episode (sim) or per run (real)
 N_SEQUENCES = 3      # random action sequences sampled each step
-HORIZON = 3          # planning horizon (timesteps)
+HORIZON = 5          # planning horizon (timesteps)
 GAMMA = 0.99          # discount factor
 STEP_FPS_REAL = 3.0   # actuation / capture rate for the real bot
 transform = config.TRANSFORM
 
 
-# In[18]:
+# In[19]:
 
 
 def tensor_to_rgb(tensor):
@@ -48,7 +49,7 @@ def tensor_to_rgb(tensor):
     return img.astype(np.uint8)
 
 
-# In[4]:
+# In[20]:
 
 
 @torch.no_grad()
@@ -73,7 +74,7 @@ def world_model_predict_next(world_model, reward_model,
     return next_frame, reward
 
 
-# In[5]:
+# In[21]:
 
 
 @torch.no_grad()
@@ -111,7 +112,7 @@ def choose_action_mpc(ctx, cur_frame, prev_frames, N, H, gamma):
     return int(seqs[best_idx, 0].item()), returns[best_idx].item()
 
 
-# In[20]:
+# In[22]:
 
 
 def run_sim(episodes=EPISODES, steps=STEPS, N=N_SEQUENCES, H=HORIZON, gamma=GAMMA):
@@ -126,19 +127,28 @@ def run_sim(episodes=EPISODES, steps=STEPS, N=N_SEQUENCES, H=HORIZON, gamma=GAMM
         frames, titles = [], []
 
         while not done:
-            a_idx, _ = choose_action_mpc(ctx, ctx.current_frame_tensor, ctx.prev_frames_tensor,
-                                         N, H, gamma)
+            # pick an action with MPC
+            a_idx, _ = choose_action_mpc(ctx, ctx.current_frame_tensor,
+                                         ctx.prev_frames_tensor, N, H, gamma)
+
+            # **–– take the action and get the reward ––**
+            _, r, done, _ = env.step(a_idx)                     # ← moved ↑ so r is available
+
+            # **–– store the frame that results from the action ––**
             rgb = tensor_to_rgb(ctx.current_frame_tensor.squeeze(0))
             frames.append(rgb)
-            titles.append(f"s{step}\na{a_idx}")
-            _, r, done, _ = env.step(a_idx)
+
+            # **–– add reward to the title ––**
+            titles.append(f"s{step}\na{a_idx}\nr{r:.2f}")       # ← NEW
+
             ep_ret += r
-            step += 1
+            step  += 1
 
         duration = time.time() - start_t
         episode_returns.append(ep_ret)
         ep_durations.append(duration)
-        print(f"Episode {ep+1} finished. Return = {ep_ret:.3f} | Duration = {duration:.2f} s")
+        print(f"Episode {ep+1} finished. Return = {ep_ret:.3f} | "
+              f"Duration = {duration:.2f}s")
 
         # Display sequence grid
         n_frames = len(frames)
@@ -175,7 +185,7 @@ def run_sim(episodes=EPISODES, steps=STEPS, N=N_SEQUENCES, H=HORIZON, gamma=GAMM
     print(f"Average duration: {np.mean(ep_durations):.2f} s ± {np.std(ep_durations):.2f}")
 
 
-# In[21]:
+# In[24]:
 
 
 run_sim()

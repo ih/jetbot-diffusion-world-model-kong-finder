@@ -13,7 +13,7 @@ get_ipython().system('pip install importnb')
 get_ipython().system('pip install scikit-image')
 
 
-# In[3]:
+# In[1]:
 
 
 import torch
@@ -38,7 +38,7 @@ with Notebook():
     from jetbot_dataset import *
 
 
-# In[4]:
+# In[2]:
 
 
 def evaluate_model_quantitative(model, test_dataloader, betas, alphas_cumprod, num_timesteps, device, num_prev_frames, action_tolerance=1e-6):
@@ -225,7 +225,7 @@ def evaluate_model_quantitative(model, test_dataloader, betas, alphas_cumprod, n
     return avg_metrics
 
 
-# In[5]:
+# In[3]:
 
 
 # --- Helper Function for Displaying PIL Images in Subplots ---
@@ -384,7 +384,7 @@ def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
     return Subset(input_dataset, filtered_indices)
 
 
-# In[6]:
+# In[4]:
 
 
 # --- Automatic Checkpoint Loading Logic ---
@@ -476,7 +476,7 @@ else:
     print(f"Model Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
 
-# In[7]:
+# In[5]:
 
 
 model.eval()
@@ -496,13 +496,13 @@ alphas_cumprod = torch.cumprod(alphas, axis=0).to(config.DEVICE)
 dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
 
 
-# In[8]:
+# In[6]:
 
 
 train_dataset, test_dataset = load_train_test_split(dataset, config.SPLIT_DATASET_FILENAME)
 
 
-# In[10]:
+# In[7]:
 
 
 target_action = .1
@@ -516,7 +516,7 @@ target_action = 0
 test_dataset_action_0 = filter_dataset_by_action(test_dataset, target_action)
 
 
-# In[11]:
+# In[8]:
 
 
 entry_indx = 375
@@ -546,7 +546,7 @@ actual = target_dataset[entry_indx+config.NUM_PREV_FRAMES]
 display_dataset_entry(actual)
 
 
-# In[14]:
+# In[9]:
 
 
 subset_idx = 375
