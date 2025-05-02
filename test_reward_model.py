@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[5]:
+# In[1]:
 
 
 import torch
@@ -29,7 +29,7 @@ with Notebook():
 print(f"Using device: {config.DEVICE}")
 
 
-# In[6]:
+# In[2]:
 
 
 # --- Configuration (from config.py and reward_estimator_training.ipynb) ---
@@ -45,7 +45,7 @@ SEQUENCE_LENGTH = config.NUM_PREV_FRAMES # For JetbotDataset
 
 
 
-# In[7]:
+# In[3]:
 
 
 def show_reward_predictions(model, samples_list, device, title_prefix=""):
@@ -161,6 +161,57 @@ show_reward_predictions(
     device=config.DEVICE,
     title_prefix="Jetbot Dataset (General Navigation)"
 )
+
+
+# In[4]:
+
+
+# --- Live camera + real-time reward estimation --------------------
+# Place this cell AFTER you’ve imported torch, torchvision, PIL, etc.
+# Adjust the two variables below for your setup ↓↓↓
+JETBOT_IP       = "192.168.68.61"                                # <- your JetBot’s IP
+REWARD_CKPT     = rf"{config.OUTPUT_DIR}\reward_estimator\reward_estimator_best.pth"
+
+# ---------------------------------------------------------------
+from jetbot_remote_client import RemoteJetBot                    # :contentReference[oaicite:0]{index=0}:contentReference[oaicite:1]{index=1}
+from models import SimpleRewardEstimator                         # :contentReference[oaicite:2]{index=2}:contentReference[oaicite:3]{index=3}
+import ipywidgets as widgets, torch, cv2
+from PIL import Image
+import asyncio
+
+# 1) Connect to the robot
+jetbot = RemoteJetBot(JETBOT_IP)
+
+# 2) Load the reward-estimator
+device = config.DEVICE                                           # :contentReference[oaicite:4]{index=4}:contentReference[oaicite:5]{index=5}
+reward_net = SimpleRewardEstimator().to(device)
+reward_net.load_state_dict(torch.load(REWARD_CKPT, map_location=device))
+reward_net.eval()
+
+# 3) Extra widget for the reward value
+reward_label = widgets.Label(value="Reward: ---")
+display(reward_label)
+
+transform = config.TRANSFORM                                     # same pre-processing as training
+
+async def live_loop(refresh_hz=15):
+    """Continuously grab a frame, estimate reward, update widgets."""
+    while True:
+        frame = jetbot.get_frame()           # ndarray (BGR) or None
+        if frame is not None:
+            # open-CV BGR → RGB → PIL → tensor
+            rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil  = Image.fromarray(rgb)
+            x    = transform(pil).unsqueeze(0).to(device)
+
+            with torch.no_grad():
+                r = reward_net(x).item()
+
+            reward_label.value = f"Reward: {r:.3f}"
+        await asyncio.sleep(1.0 / refresh_hz)
+
+# 4) Kick off the async loop (runs until you interrupt the notebook)
+await live_loop()
 
 
 # In[ ]:
