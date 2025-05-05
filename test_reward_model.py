@@ -34,7 +34,7 @@ print(f"Using device: {config.DEVICE}")
 
 # --- Configuration (from config.py and reward_estimator_training.ipynb) ---
 REWARD_MODEL_OUTPUT_DIR = os.path.join(config.OUTPUT_DIR, 'reward_estimator')
-REWARD_CHECKPOINT_FILENAME = "reward_estimator_best.pth" # File saved during training
+REWARD_CHECKPOINT_FILENAME = "best_reward_estimator_weights.pth" # File saved during training
 BEST_MODEL_PATH = os.path.join(REWARD_MODEL_OUTPUT_DIR, REWARD_CHECKPOINT_FILENAME)
 
 IMAGE_SIZE = config.IMAGE_SIZE
@@ -45,7 +45,7 @@ SEQUENCE_LENGTH = config.NUM_PREV_FRAMES # For JetbotDataset
 
 
 
-# In[3]:
+# In[8]:
 
 
 def show_reward_predictions(model, samples_list, device, title_prefix=""):
@@ -105,7 +105,7 @@ def show_reward_predictions(model, samples_list, device, title_prefix=""):
     plt.show()
 
 
-# In[8]:
+# In[9]:
 
 
 # --- Load Model ---
@@ -113,7 +113,7 @@ print("\n--- Loading Reward Estimator Model ---")
 reward_model = None
 if os.path.exists(BEST_MODEL_PATH):
     try:
-        reward_model = SimpleRewardEstimator()
+        reward_model = RewardEstimatorResNet(n_frames=5) 
         reward_model.load_state_dict(torch.load(BEST_MODEL_PATH, map_location=config.DEVICE))
         reward_model.to(config.DEVICE)
         reward_model.eval() # Set to evaluation mode
@@ -163,7 +163,7 @@ show_reward_predictions(
 )
 
 
-# In[4]:
+# In[11]:
 
 
 # --- Live camera + real-time reward estimation --------------------

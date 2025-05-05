@@ -179,6 +179,31 @@ class SimpleRewardEstimator(nn.Module):
         reward = self.fc_layers(x)
         return reward
 
+import torchvision.models as tvm
+import torch.nn as nn
+import config
+
+class RewardEstimatorResNet(nn.Module):
+    """
+    ResNet-18 backbone that consumes (3*(NUM_PREV_FRAMES+1))-channel
+    stacked RGB input and regresses a scalar reward.
+    """
+    def __init__(self, n_frames=config.NUM_PREV_FRAMES + 1):
+        super().__init__()
+        self.backbone = tvm.resnet18(weights=tvm.ResNet18_Weights.DEFAULT)
+        # patch first conv to accept stacked frames
+        self.backbone.conv1 = nn.Conv2d(3 * n_frames, 64,
+                                        kernel_size=7, stride=2, padding=3,
+                                        bias=False)
+        # freeze early layers for speed / stability
+        for name, p in self.backbone.named_parameters():
+            if name.startswith(("conv1", "bn1", "layer1")):
+                p.requires_grad = False
+        self.backbone.fc = nn.Linear(self.backbone.fc.in_features, 1)
+
+    def forward(self, x):                 # (B, 3*n_frames, H, W)
+        return self.backbone(x).squeeze(1)
+
 
 # --- Optional: Model Factory ---
 # This dictionary maps names (used in config) to classes
@@ -186,6 +211,7 @@ MODEL_REGISTRY = {
     'SimpleUNetV1': SimpleUNetV1,
     'SimpleUNetV2_Larger': SimpleUNetV2_Larger,
     'SimpleRewardEstimator': SimpleRewardEstimator,
+    'RewardEstimatorResNet':  RewardEstimatorResNet,
     # Add other models here
 }
 

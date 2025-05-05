@@ -5,6 +5,7 @@
 
 
 from torch.utils.data import Dataset
+import pandas as pd
 
 
 # In[2]:

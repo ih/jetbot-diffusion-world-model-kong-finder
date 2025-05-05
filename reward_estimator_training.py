@@ -41,6 +41,19 @@ print(f"Main data dir: {config.DATA_DIR}")
 # ## Configuration
 # Define training hyperparameters. Some can be reused from `config.py`.
 
+# In[ ]:
+
+
+N_FRAMES          = 4                     # prev frames to stack (plus the current)
+BATCH_SIZE        = 64
+LR                = 3e-4
+EPOCHS            = 20
+IMG_SIZE          = 96                    # matches world-model training
+CHECKPOINT_DIR    = Path("outputs/reward_estimator_resnet")
+CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+DEVICE            = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 # In[2]:
 
 
@@ -82,7 +95,7 @@ reward_model.to(config.DEVICE)
 # Instantiate the dataset and create DataLoaders for training and validation.
 # 
 
-# In[8]:
+# In[3]:
 
 
 # Instantiate the dataset
@@ -150,6 +163,12 @@ else:
     val_loader = None
 
 
+
+
+# In[7]:
+
+
+pd
 
 
 # ## Training Setup
