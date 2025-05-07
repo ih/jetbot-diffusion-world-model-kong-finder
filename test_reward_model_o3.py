@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[44]:
 
 
 import os, random, asyncio, cv2
@@ -25,7 +25,7 @@ device = torch.device(config.DEVICE)
 print("Using device ➜", device)
 
 
-# In[6]:
+# In[3]:
 
 
 REWARD_MODEL_OUTPUT_DIR = os.path.join(config.OUTPUT_DIR, "reward_estimator")
@@ -40,7 +40,7 @@ TRANSFORM = T.Compose([
 BEST_WEIGHTS
 
 
-# In[7]:
+# In[36]:
 
 
 def stack_frames(prev_frames: torch.Tensor, current_img: torch.Tensor):
@@ -52,6 +52,10 @@ def show_reward_predictions(model, dataset, num_samples=5, title=""):
     """Display random samples with predicted rewards."""
     model.eval()
     idxs = random.sample(range(len(dataset)), num_samples)
+    # only pick idxs in the range of the training data
+    # idxs = random.sample(range(7000), num_samples)
+    print("Dataset Indices")
+    print(idxs)
     plt.figure(figsize=(12, 4 * num_samples))
 
     for i, idx in enumerate(idxs):
@@ -70,7 +74,7 @@ def show_reward_predictions(model, dataset, num_samples=5, title=""):
     plt.tight_layout(); plt.show()
 
 
-# In[8]:
+# In[46]:
 
 
 model = RewardEstimatorResNet(n_frames=N_PREV_FRAMES + 1).to(device)
@@ -81,7 +85,7 @@ print("Model loaded with",
       sum(p.numel() for p in model.parameters()) / 1e6, "M params")
 
 
-# In[9]:
+# In[13]:
 
 
 dataset = JetbotDataset(
@@ -96,7 +100,7 @@ print("Dataset length:", len(dataset))
 
 
 
-# In[10]:
+# In[43]:
 
 
 show_reward_predictions(
@@ -104,7 +108,109 @@ show_reward_predictions(
 )
 
 
-# In[13]:
+# In[45]:
+
+
+# ---------------- Visualise labelled training samples ----------------
+def show_training_samples(model, n=5):
+    """
+    Show *n* random samples that were manually labelled for reward.
+    For every sample it renders the current frame together with both
+    the ground‑truth reward and the model’s estimate.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        A `RewardEstimatorResNet` that is already loaded on the right device.
+    n : int
+        Number of examples to display.
+    """
+    import random, os, pandas as pd, torch
+    import torchvision.transforms as T
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    import config
+
+    # ------------------------------------------------------------------
+    # Paths / hyper‑parameters taken from config so they stay in sync
+    # ------------------------------------------------------------------
+    MAIN_CSV      = config.CSV_PATH                      # full frames CSV
+    REWARD_CSV    = config.MANUAL_COLLECTED_REWARD_CSV   # labels CSV
+    DATA_ROOT     = config.DATA_DIR                      # image folder
+    N_PREV_FRAMES = config.NUM_PREV_FRAMES               # history length
+    IMG_SIZE      = config.IMAGE_SIZE
+
+    device = next(model.parameters()).device
+    to_tensor = T.Compose([T.Resize((IMG_SIZE, IMG_SIZE)), T.ToTensor()])
+
+    # ------------------------------------------------------------------
+    # Load metadata
+    # ------------------------------------------------------------------
+    main_df   = pd.read_csv(MAIN_CSV)
+    reward_df = pd.read_csv(REWARD_CSV)
+
+    labelled_idxs = reward_df["dataframe_index"].tolist()
+    random.shuffle(labelled_idxs)
+
+    shown = 0
+    plt.figure(figsize=(6, 4 * n))
+
+    for idx in labelled_idxs:
+        if shown == n:
+            break
+        if idx < N_PREV_FRAMES:
+            continue                       # not enough history
+
+        # keep only examples whose whole history belongs to one session
+        same_session = (
+            main_df.loc[idx, "session_id"]
+            == main_df.loc[idx - N_PREV_FRAMES, "session_id"]
+        )
+        if not same_session:
+            continue
+
+        # -------- build the (3·(N+1), H, W) tensor expected by the model
+        paths = [
+            main_df.loc[idx - off, "image_path"]
+            for off in range(N_PREV_FRAMES, -1, -1)
+        ]
+        frames = [
+            to_tensor(Image.open(os.path.join(DATA_ROOT, p)).convert("RGB"))
+            for p in paths
+        ]
+        stacked = torch.cat(frames, dim=0).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            est_reward = model(stacked).item()
+
+        true_reward = float(
+            reward_df.loc[reward_df["dataframe_index"] == idx, "assigned_reward"]
+            .values[0]
+        )
+        curr_frame = frames[-1]             # last in the list is current
+
+        plt.subplot(n, 1, shown + 1)
+        plt.imshow(T.ToPILImage()(curr_frame.clamp(0, 1).cpu()))
+        plt.axis("off")
+        plt.title(f"True r = {true_reward:.3f}   |   Est r = {est_reward:.3f}")
+
+        shown += 1
+
+    if shown == 0:
+        print("⚠️  No valid labelled samples found ‑ check NUM_PREV_FRAMES & CSVs")
+        return
+
+    plt.tight_layout()
+    plt.show()
+
+
+# In[52]:
+
+
+show_training_samples(model, 5)
+
+
+# In[7]:
 
 
 JETBOT_IP  = "192.168.68.52"   # ← change to your robot’s IP

@@ -128,48 +128,62 @@ loss_fn = nn.MSELoss()
 print(f'Param count: {sum(p.numel() for p in model.parameters())/1e6:.2f} M')
 
 
-# In[8]:
+# In[7]:
 
 
 # ---------------- Training loop with progress bars ----------------
 EPOCHS   = 50
-best_val = float('inf')
+best_val = float("inf")
 
 for epoch in range(1, EPOCHS + 1):
-    # ----- training -----
-    model.train(); running = 0
-    for x, y in tqdm(train_loader, desc=f'E{epoch:02}/train', leave=False):
+    # ── training ────────────────────────────────────────────────
+    model.train(); running = 0.0
+    for x, y in tqdm(train_loader,
+                     desc=f"E{epoch:02}/train",
+                     leave=False,
+                     unit="batch"):
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
         opt.zero_grad(set_to_none=True)
-        with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
-            pred = model(x).squeeze()
-            loss = loss_fn(pred, y)
+
+        with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+            pred  = model(x).squeeze()
+            loss  = loss_fn(pred, y)
+
         scaler.scale(loss).backward()
         scaler.step(opt); scaler.update()
         running += loss.item() * x.size(0)
+
     train_loss = running / len(train_loader.dataset)
 
-    # ----- validation -----
-    model.eval(); running = 0
+    # ── validation ──────────────────────────────────────────────
+    model.eval(); running = 0.0
     with torch.no_grad():
-        for x, y in tqdm(val_loader, desc=f'E{epoch:02}/val', leave=False):
+        for x, y in tqdm(val_loader,
+                         desc=f"E{epoch:02}/val ",
+                         leave=False,
+                         unit="batch"):
             x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-            with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
                 running += loss_fn(model(x).squeeze(), y).item() * x.size(0)
+
     val_loss = running / len(val_loader.dataset)
 
-    # ----- checkpoint -----
-if val_loss < best_val:
-    best_val = val_loss
+    # ── checkpoint (weights-only copy) ───────────────────────────
+    if val_loss < best_val:
+        best_val = val_loss
+        torch.save(
+            model.state_dict(),
+            os.path.join(REWARD_MODEL_OUTPUT_DIR,
+                         "best_reward_estimator_weights.pth")
+        )
+        checkpoint_flag = "✨  (best)"
+    else:
+        checkpoint_flag = ""
 
-
-
-    # lightweight copy (model weights only) for inference notebooks
-    torch.save(model.state_dict(),
-               os.path.join(REWARD_MODEL_OUTPUT_DIR, "best_reward_estimator_weights.pth"))
-
-    print(f"✨ Epoch {epoch:02} – new best val {val_loss:.4f}. "
-          f"Saved {os.path.join(REWARD_MODEL_OUTPUT_DIR, 'best_reward_estimator_weights.pth')}")
+    # ── epoch summary line (no overwrite) ───────────────────────
+    print(f"Epoch {epoch:02}/{EPOCHS} ▸ "
+          f"train {train_loss:.4f}  val {val_loss:.4f}  "
+          f"best {best_val:.4f}{checkpoint_flag}")
 
 
 # ### Why the GPU might still sit idle

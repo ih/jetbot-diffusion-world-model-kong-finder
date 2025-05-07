@@ -34,7 +34,7 @@ print(f"Using device: {config.DEVICE}")
 
 # --- Configuration (from config.py and reward_estimator_training.ipynb) ---
 REWARD_MODEL_OUTPUT_DIR = os.path.join(config.OUTPUT_DIR, 'reward_estimator')
-REWARD_CHECKPOINT_FILENAME = "best_reward_estimator_weights.pth" # File saved during training
+REWARD_CHECKPOINT_FILENAME = "reward_estimator_best.pth" # File saved during training
 BEST_MODEL_PATH = os.path.join(REWARD_MODEL_OUTPUT_DIR, REWARD_CHECKPOINT_FILENAME)
 
 IMAGE_SIZE = config.IMAGE_SIZE
@@ -45,7 +45,7 @@ SEQUENCE_LENGTH = config.NUM_PREV_FRAMES # For JetbotDataset
 
 
 
-# In[8]:
+# In[3]:
 
 
 def show_reward_predictions(model, samples_list, device, title_prefix=""):
@@ -105,7 +105,7 @@ def show_reward_predictions(model, samples_list, device, title_prefix=""):
     plt.show()
 
 
-# In[9]:
+# In[4]:
 
 
 # --- Load Model ---
@@ -113,7 +113,7 @@ print("\n--- Loading Reward Estimator Model ---")
 reward_model = None
 if os.path.exists(BEST_MODEL_PATH):
     try:
-        reward_model = RewardEstimatorResNet(n_frames=5) 
+        reward_model = SimpleRewardEstimator() 
         reward_model.load_state_dict(torch.load(BEST_MODEL_PATH, map_location=config.DEVICE))
         reward_model.to(config.DEVICE)
         reward_model.eval() # Set to evaluation mode
@@ -126,7 +126,7 @@ else:
     print(f"Error: Best model checkpoint not found at {BEST_MODEL_PATH}. Cannot run test.")
 
 
-# In[9]:
+# In[5]:
 
 
 print("\n--- Loading General Jetbot Dataset ---")
@@ -144,12 +144,13 @@ except Exception as e:
     jetbot_dataset = None
 
 
-# In[18]:
+# In[8]:
 
 
 num_samples_to_show = 5
 jetbot_samples_to_show = []
-indices_to_get = random.sample(range(len(jetbot_dataset)), num_samples_to_show)
+indices_to_get = random.sample(range(2000), num_samples_to_show)
+# indices_to_get = random.sample(range(len(jetbot_dataset)), num_samples_to_show)
 
 for i in indices_to_get:
     current_image, _, _ = jetbot_dataset[i] # Get the full sample
@@ -163,13 +164,13 @@ show_reward_predictions(
 )
 
 
-# In[11]:
+# In[9]:
 
 
 # --- Live camera + real-time reward estimation --------------------
 # Place this cell AFTER you’ve imported torch, torchvision, PIL, etc.
 # Adjust the two variables below for your setup ↓↓↓
-JETBOT_IP       = "192.168.68.61"                                # <- your JetBot’s IP
+JETBOT_IP       = "192.168.68.52"                                # <- your JetBot’s IP
 REWARD_CKPT     = rf"{config.OUTPUT_DIR}\reward_estimator\reward_estimator_best.pth"
 
 # ---------------------------------------------------------------
