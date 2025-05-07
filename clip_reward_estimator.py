@@ -1,14 +1,20 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # CLIP‑Based Reward Estimator
+# # Contrastive CLIP Reward Estimator
 # 
-# This notebook replaces the ResNet reward head with a language‑conditioned CLIP model from **`transformers`**. The scalar reward is the cosine similarity between the current frame and the prompt **"a red Kong dog toy centered in the frame"**. Higher values → Kong is more centered.
+# This notebook upgrades the original CLIP‑based reward head by **adding a negative prompt**.  
+# The reward is the sigmoid‑scaled difference between the cosine similarity of the frame with a **positive** prompt
+# (*“a red Kong dog toy centered in the frame”*) and a **negative** prompt
+# (*“an empty kitchen floor with no toy”*).
+# 
+# A centred red Kong should yield rewards ≳ 0.8, while frames with no toy (or off‑centre toy) drop ≲ 0.2.
+# 
 
-# In[1]:
+# In[7]:
 
 
-import os, random, torch
+import os, random, torch, json
 import torchvision.transforms as T
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -24,41 +30,57 @@ device = torch.device(config.DEVICE)
 print("Using device ➜", device)
 
 # ----------------------------------------------------------------------
-# Load CLIP model (ViT‑B/32 for speed; switch to larger backbone if GPU allows)
+# Load CLIP model (ViT‑B/32 for speed; switch to ViT‑L/14 if you have VRAM)
 # ----------------------------------------------------------------------
 MODEL_NAME = "openai/clip-vit-base-patch32"
 
 processor = CLIPProcessor.from_pretrained(MODEL_NAME)
 clip_model = CLIPModel.from_pretrained(MODEL_NAME).eval().to(device)
 
-# Pre‑encode the text prompt so we don't waste time each call
-PROMPT = "a red Kong dog toy centered in the frame"
+# ----------------------------------------------------------------------
+# Encode positive & negative text prompts ONCE
+# ----------------------------------------------------------------------
+POS_PROMPT = "a red Kong dog toy centered in the frame"
+NEG_PROMPT = "an empty kitchen floor with no toy"
+
 with torch.no_grad():
-    txt_inputs = processor(text=PROMPT, return_tensors="pt").to(device)
-    text_emb = clip_model.get_text_features(**txt_inputs).float()
-    text_emb = text_emb / text_emb.norm(p=2, dim=-1, keepdim=True)   # (1,dim)
-print("Text embedding ready.")
+    pos_emb = clip_model.get_text_features(**processor(text=POS_PROMPT, return_tensors="pt").to(device)).float()
+    pos_emb /= pos_emb.norm(p=2, dim=-1, keepdim=True)
+
+    neg_emb = clip_model.get_text_features(**processor(text=NEG_PROMPT, return_tensors="pt").to(device)).float()
+    neg_emb /= neg_emb.norm(p=2, dim=-1, keepdim=True)
+
+print("Positive & negative text embeddings ready.")
 
 
-# In[2]:
+# In[8]:
 
 
-def clip_reward(pil_img):
-    """Return a scalar ∈[0,1] where 1 means the red Kong is well‑centered."""
-    clip_model.eval()
+def clip_reward(pil_img, tau: float = 3.0):
+    """Contrastive CLIP reward ∈[0,1].
+    1 ⇒ Kong centred; 0 ⇒ empty floor or off‑centre.
+
+    Args:
+
+        pil_img (PIL.Image): input RGB frame
+
+        tau (float): temperature / scaling of the sigmoid; higher = steeper
+
+    """
     with torch.no_grad():
-        inputs = processor(images=pil_img, return_tensors="pt").to(device)
+        inputs  = processor(images=pil_img, return_tensors="pt").to(device)
         img_emb = clip_model.get_image_features(**inputs).float()
-        img_emb = img_emb / img_emb.norm(p=2, dim=-1, keepdim=True)  # (1,dim)
-        sim = (img_emb @ text_emb.T).squeeze()                        # cosine ≈‑1…1
-        return (sim + 1) / 2                                          # map to 0…1
+        img_emb /= img_emb.norm(p=2, dim=-1, keepdim=True)
+
+        delta = (img_emb @ pos_emb.T) - (img_emb @ neg_emb.T)   # (1,1)
+        return torch.sigmoid(tau * delta).item()
 
 
-# In[3]:
+# In[9]:
 
 
 # ----------------------------------------------------------------------
-# Load the JetbotDataset in *exactly* the same way as in the ResNet notebook
+# Load your Jetbot dataset exactly as before
 # ----------------------------------------------------------------------
 IMAGE_SIZE    = config.IMAGE_SIZE
 N_PREV_FRAMES = config.NUM_PREV_FRAMES
@@ -79,30 +101,31 @@ dataset = JetbotDataset(
 print("Dataset length:", len(dataset))
 
 
-# In[4]:
+# In[10]:
 
 
-def show_clip_rewards(ds, n=5, title="CLIP reward on random samples"):
+def show_clip_rewards(ds, n=6, title="Contrastive CLIP reward on random samples"):
     idxs = random.sample(range(len(ds)), n)
-    plt.figure(figsize=(8, 4*n))
+    plt.figure(figsize=(6, 3*n))
     for i, idx in enumerate(idxs):
         curr_img, _, _ = ds[idx]           # JetbotDataset returns (curr, r, prev)
         pil_img = T.ToPILImage()(curr_img)
-        r = clip_reward(pil_img).item()
+        r = clip_reward(pil_img)
 
         plt.subplot(n, 1, i+1)
         plt.imshow(pil_img)
         plt.axis(False)
         plt.title(f"Reward (centered‑Kong score): {r:.3f}")
-    plt.suptitle(title, y=1.02, fontsize=16)
+    plt.suptitle(title, y=1.02, fontsize=15)
     plt.tight_layout()
     plt.show()
 
-show_clip_rewards(dataset, n=5)
+# 🔍 Try it on a few random frames
+show_clip_rewards(dataset, n=4)
 
 
-# ## (Optional) Live JetBot loop
-# Uncomment and adapt the following cell if you want to stream frames from a real JetBot and display the CLIP‑based reward in real time.
+# ## (Optional) Live JetBot Reward Stream
+# Uncomment and adapt the next cell to stream frames from your real JetBot and display the contrastive reward in real time.
 
 # In[ ]:
 
@@ -125,7 +148,7 @@ show_clip_rewards(dataset, n=5)
 #         if bgr is not None:
 #             rgb  = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 #             pil  = Image.fromarray(rgb)
-#             r = clip_reward(pil).item()
+#             r = clip_reward(pil_img=pil)
 #             reward_label.value = f"Reward: {r:.3f}"
 #         await asyncio.sleep(1 / REFRESH_HZ)
 #
