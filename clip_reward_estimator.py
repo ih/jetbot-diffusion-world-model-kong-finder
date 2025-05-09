@@ -11,7 +11,7 @@
 # A centred red Kong should yield rewards ≳ 0.8, while frames with no toy (or off‑centre toy) drop ≲ 0.2.
 # 
 
-# In[7]:
+# In[1]:
 
 
 import os, random, torch, json
@@ -31,17 +31,22 @@ print("Using device ➜", device)
 
 # ----------------------------------------------------------------------
 # Load CLIP model (ViT‑B/32 for speed; switch to ViT‑L/14 if you have VRAM)
+CKPT_PATH = r"C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\output_model_small_session_split_data\clip_kong_finetune\ckpt-final"
+clip_model = CLIPModel.from_pretrained(CKPT_PATH, torch_dtype=torch.float16).eval().to(device)
+processor   = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")   # or vit-large-patch14
 # ----------------------------------------------------------------------
-MODEL_NAME = "openai/clip-vit-base-patch32"
+# MODEL_NAME = r"C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\output_model_small_session_split_data\clip_kong_finetune"
+# MODEL_NAME = "openai/clip-vit-large-patch14"
 
-processor = CLIPProcessor.from_pretrained(MODEL_NAME)
-clip_model = CLIPModel.from_pretrained(MODEL_NAME).eval().to(device)
+#processor = CLIPProcessor.from_pretrained(MODEL_NAME)
+#clip_model = CLIPModel.from_pretrained(MODEL_NAME).eval().to(device)
 
 # ----------------------------------------------------------------------
 # Encode positive & negative text prompts ONCE
 # ----------------------------------------------------------------------
-POS_PROMPT = "a red Kong dog toy centered in the frame"
-NEG_PROMPT = "an empty kitchen floor with no toy"
+# POS_PROMPT = "a red Kong dog toy in frame"
+POS_PROMPT = "a red object on the ground"
+NEG_PROMPT = "a kitchen floor with no red object on the ground"
 
 with torch.no_grad():
     pos_emb = clip_model.get_text_features(**processor(text=POS_PROMPT, return_tensors="pt").to(device)).float()
@@ -53,10 +58,10 @@ with torch.no_grad():
 print("Positive & negative text embeddings ready.")
 
 
-# In[8]:
+# In[2]:
 
 
-def clip_reward(pil_img, tau: float = 3.0):
+def clip_reward(pil_img, tau: float = 50.0):
     """Contrastive CLIP reward ∈[0,1].
     1 ⇒ Kong centred; 0 ⇒ empty floor or off‑centre.
 
@@ -76,7 +81,7 @@ def clip_reward(pil_img, tau: float = 3.0):
         return torch.sigmoid(tau * delta).item()
 
 
-# In[9]:
+# In[3]:
 
 
 # ----------------------------------------------------------------------
@@ -101,7 +106,7 @@ dataset = JetbotDataset(
 print("Dataset length:", len(dataset))
 
 
-# In[10]:
+# In[4]:
 
 
 def show_clip_rewards(ds, n=6, title="Contrastive CLIP reward on random samples"):
@@ -120,8 +125,53 @@ def show_clip_rewards(ds, n=6, title="Contrastive CLIP reward on random samples"
     plt.tight_layout()
     plt.show()
 
-# 🔍 Try it on a few random frames
-show_clip_rewards(dataset, n=4)
+
+
+# In[16]:
+
+
+show_clip_rewards(dataset)
+
+
+# In[10]:
+
+
+vals = []
+for idx in random.sample(range(len(dataset)), 200):
+    pil = T.ToPILImage()(dataset[idx][0])
+    with torch.no_grad():
+        img_emb = clip_model.get_image_features(**processor(images=pil, return_tensors="pt").to(device)).float()
+        img_emb /= img_emb.norm(dim=-1, keepdim=True)
+        vals.append((img_emb @ pos_emb.T - img_emb @ neg_emb.T).item())
+plt.hist(vals, bins=40); plt.show()
+
+
+# In[ ]:
+
+
+import torch
+from PIL import Image
+from transformers import CLIPProcessor, CLIPModel
+
+model_name = "openai/clip-vit-base-patch32"
+model = CLIPModel.from_pretrained(model_name)
+processor = CLIPProcessor.from_pretrained(model_name)
+
+image = Image.open("your_image.jpg")
+prompts = [
+    "a red Kong toy centered",
+    "an empty kitchen floor",
+    "a person holding a ball",
+    "a red dog toy off-center",
+]
+
+inputs = processor(text=prompts, images=image, return_tensors="pt", padding=True)
+outputs = model(**inputs)
+logits_per_image = outputs.logits_per_image  # similarity scores
+probs = logits_per_image.softmax(dim=1).detach().numpy()
+
+for p, prob in zip(prompts, probs[0]):
+    print(f"{p:<30}: {prob:.4f}")
 
 
 # ## (Optional) Live JetBot Reward Stream
