@@ -127,7 +127,7 @@ def show_clip_rewards(ds, n=6, title="Contrastive CLIP reward on random samples"
 
 
 
-# In[16]:
+# In[8]:
 
 
 show_clip_rewards(dataset)
@@ -177,30 +177,36 @@ for p, prob in zip(prompts, probs[0]):
 # ## (Optional) Live JetBot Reward Stream
 # Uncomment and adapt the next cell to stream frames from your real JetBot and display the contrastive reward in real time.
 
+# In[8]:
+
+
+from jetbot_remote_client import RemoteJetBot
+import ipywidgets as widgets, asyncio, cv2
+#
+JETBOT_IP  = "192.168.68.60"          # change to your robot's IP
+REFRESH_HZ = 15
+#
+bot = RemoteJetBot(JETBOT_IP)
+print("Connected to JetBot at", JETBOT_IP)
+#
+reward_label = widgets.Label(value="Reward: ---")
+display(reward_label)
+#
+async def live_loop():
+    while True:
+        bgr = bot.get_frame()
+        if bgr is not None:
+            rgb  = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            pil  = Image.fromarray(rgb)
+            r = clip_reward(pil_img=pil)
+            reward_label.value = f"Reward: {r:.3f}"
+        await asyncio.sleep(1 / REFRESH_HZ)
+
+await live_loop()
+
+
 # In[ ]:
 
 
-# from jetbot_remote_client import RemoteJetBot
-# import ipywidgets as widgets, asyncio, cv2
-#
-# JETBOT_IP  = "192.168.68.52"          # change to your robot's IP
-# REFRESH_HZ = 15
-#
-# bot = RemoteJetBot(JETBOT_IP)
-# print("Connected to JetBot at", JETBOT_IP)
-#
-# reward_label = widgets.Label(value="Reward: ---")
-# display(reward_label)
-#
-# async def live_loop():
-#     while True:
-#         bgr = bot.get_frame()
-#         if bgr is not None:
-#             rgb  = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-#             pil  = Image.fromarray(rgb)
-#             r = clip_reward(pil_img=pil)
-#             reward_label.value = f"Reward: {r:.3f}"
-#         await asyncio.sleep(1 / REFRESH_HZ)
-#
-# await live_loop()
+
 
