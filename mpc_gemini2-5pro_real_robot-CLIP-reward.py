@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.transforms as transforms
+from torchvision.transforms.functional import to_pil_image
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -30,7 +31,7 @@ import models
 from models import SimpleUNetV1
 from transformers import CLIPProcessor, CLIPModel
 with Notebook():
-    from action_conditioned_diffusion_world_model_gemini import linear_beta_schedule, cosine_beta_schedule, get_index_from_list
+    from action_conditioned_diffusion_world_model_gemini import linear_beta_schedule, cosine_beta_schedule, get_index_from_list, forward_diffusion_sample
     from jetbot_remote_client import RemoteJetBot
 
 logger = logging.getLogger('MPC_Client')
@@ -43,7 +44,7 @@ logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
 
 
 # --- JetBot Server Connection ---
-JETBOT_SERVER_IP = "192.168.68.61" # <<< --- REPLACE WITH YOUR JETBOT'S ACTUAL IP ADDRESS
+JETBOT_SERVER_IP = "192.168.68.62" # <<< --- REPLACE WITH YOUR JETBOT'S ACTUAL IP ADDRESS
 # Port identified from jetbot_server.py (uses rpyc)
 JETBOT_SERVER_PORT = 18861
 
@@ -233,18 +234,47 @@ with torch.no_grad():
     pos_emb /= pos_emb.norm(dim=-1, keepdim=True)
     neg_emb /= neg_emb.norm(dim=-1, keepdim=True)
 
-def clip_reward_batch(img_batch, tau: float = 5.0):
+def tensor_batch_to_pil_images(tensor_batch):
     """
-    img_batch : (B, 3, H, W) in [-1,1]  –> returns (B,) reward in [0,1]
+    Converts a batch of normalized [-1, 1] tensors (B, 3, H, W)
+    to a list of PIL images for CLIP processing.
     """
-    # Map from [-1,1] → processor expects [0,1] float
-    imgs = (img_batch * 0.5 + 0.5).clamp(0, 1)
+    # Unnormalize from [-1, 1] → [0, 1]
+    unnorm = (tensor_batch + 1.0) / 2.0
+    unnorm = torch.clamp(unnorm, 0.0, 1.0)
+
+    return [to_pil_image(img.cpu()) for img in unnorm]
+
+def tensor_to_pil_image(t):
+    """
+    Convert a single normalized tensor in [-1, 1] to a PIL image.
+    """
+    t = (t + 1.0) / 2.0  # Convert to [0, 1]
+    t = torch.clamp(t, 0.0, 1.0)
+    return to_pil_image(t.cpu())
+
+def clip_reward_batch(pil_imgs, tau: float = 50.0):
+    """
+    Vectorized contrastive CLIP reward for a batch of PIL images.
+    Args:
+        pil_imgs (list of PIL.Image): input RGB frames
+        tau (float): contrastive temperature
+    Returns:
+        rewards: list of floats in [0, 1]
+    """
     with torch.no_grad():
-        inputs   = processor(images=imgs, return_tensors="pt").to(device)
-        img_emb  = clip_model.get_image_features(**inputs).float()
-        img_emb /= img_emb.norm(dim=-1, keepdim=True)
-        delta    = (img_emb @ pos_emb.T) - (img_emb @ neg_emb.T)   # (B,1)
-        return torch.sigmoid(tau * delta).squeeze(1)              # (B,)
+        inputs = processor(images=pil_imgs, return_tensors="pt", padding=True).to(device)
+        img_emb = clip_model.get_image_features(**inputs).float()
+        img_emb /= img_emb.norm(p=2, dim=-1, keepdim=True)
+
+        # Broadcast dot products across batch
+        pos_scores = img_emb @ pos_emb.T
+        neg_scores = img_emb @ neg_emb.T
+        delta = pos_scores - neg_scores  # shape: (B, 1)
+        return torch.sigmoid(tau * delta).squeeze(1).tolist()
+
+def clip_reward_single(tensor_img):
+    return clip_reward_batch([tensor_to_pil_image(tensor_img)])[0]
 
 
 # In[5]:
@@ -315,38 +345,54 @@ def apply_action_real(right_motor_action):
 
 def sample_next_obs(world_model, obs_buffer, action_scalar):
     """
-    Diffusion-sample the *next* frame given the current observation history
-    and a (scalar) action. Returns a (3,H,W) tensor in [-1,1].
+    Predicts the very next frame conditioned on:
+      • the most recent real frame  (obs_buffer[-1])
+      • the rolling history         (obs_buffer[-K:-1])
+      • a scalar action in [-1,1]
+
+    Returns a (3,H,W) tensor in [-1,1].
     """
-    prev_frames = format_prev_frames(obs_buffer)
-    if prev_frames is None:
-        return None
 
-    prev_frames = prev_frames.unsqueeze(0)                    # (1, 3*K, H, W)
-    action_batch = torch.tensor([[action_scalar]],
-                                device=device, dtype=torch.float32)
-    x = torch.randn((1, IMAGE_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE),
-                    device=device)
+    # ──  inputs ──────────────────────────────────────────────────────────────
+    current_frame  = obs_buffer[-1].unsqueeze(0).to(device)           # (1,3,H,W)
+    prev_frames    = format_prev_frames(obs_buffer).unsqueeze(0).to(device)  # (1,3K,H,W)
+    action_tensor  = torch.tensor([[action_scalar]],
+                                   device=device, dtype=torch.float32)       # (1,1)
 
+    # ──  1. Add maximal noise to the *current* frame  ───────────────────────
+    t_max    = NUM_TIMESTEPS - 1
+    t_sample = torch.tensor([t_max], device=device, dtype=torch.long)
+    x, _     = forward_diffusion_sample(current_frame,
+                                        t_sample,
+                                        betas,
+                                        alphas_cumprod,
+                                        device)                              # x ≈ 𝒩(0,1)
+
+    # ──  2. Deterministic denoising loop (DDPM)  ────────────────────────────
     with torch.no_grad():
-        for i in reversed(range(NUM_TIMESTEPS)):
-            t = torch.tensor([i], device=device, dtype=torch.long)
-            alpha_t      = get_index_from_list(alphas,         t, x.shape)
-            alpha_hat_t  = get_index_from_list(alphas_cumprod, t, x.shape)
-            beta_t       = get_index_from_list(betas,          t, x.shape)
+        for i in reversed(range(1, NUM_TIMESTEPS)):
+            t = torch.full((1,), i, device=device, dtype=torch.long)
 
-            eps = world_model(x=x,
-                              timestep=t,
-                              action=action_batch,
-                              prev_frames=prev_frames)
+            # predict εₜ with the conditional U-Net
+            eps = world_model(x, t, action_tensor, prev_frames)
 
-            x = (1 / torch.sqrt(alpha_t)) * (x - ((1 - alpha_t)
-                   / torch.sqrt(1 - alpha_hat_t)) * eps)
+            # coefficients (reshape for broadcasting)
+            alpha      = alphas[i].view(1,1,1,1)
+            alpha_hat  = alphas_cumprod[i].view(1,1,1,1)
+            beta       = betas[i].view(1,1,1,1)
 
-            if i > 0:
-                x = x + torch.sqrt(beta_t) * torch.randn_like(x)
+            # DDPM update
+            if i > 1:
+                noise = torch.randn_like(x)
+            else:
+                noise = torch.zeros_like(x)
 
-    return torch.clamp(x.squeeze(0), -1.0, 1.0)               # (3,H,W)
+            x = (1 / torch.sqrt(alpha)) * (
+                    x - ((1 - alpha) / torch.sqrt(1 - alpha_hat)) * eps
+                ) + torch.sqrt(beta) * noise
+
+    # x is the predicted next frame in [-1,1]
+    return torch.clamp(x.squeeze(0), -1.0, 1.0)
 
 
 def review_step(curr_obs, curr_reward,
@@ -461,7 +507,8 @@ def predict_rewards(world_model, initial_obs_buffer_list, action_sequences_batch
             predicted_obs_batch = torch.clamp(x, -1.0, 1.0)
 
             # --- Predict reward ---
-            rewards_t = clip_reward_batch(predicted_obs_batch)
+            pil_imgs = tensor_batch_to_pil_images(predicted_obs_batch)
+            rewards_t = torch.tensor(clip_reward_batch(pil_imgs), device=device)
 
             if torch.isnan(rewards_t).any() or torch.isinf(rewards_t).any():
                 print(f"Warning: NaN/Inf detected in predicted rewards at horizon step {h_step}. Replacing with 0.")
@@ -548,36 +595,25 @@ try:
     while True:
         step_count += 1
         print(f"\n─── Step {step_count} ───")
-
-        # --------------------------------------------------------------------
-        # 1. Plan action (unchanged logic)
-        best_action, (rew0, rew1) = choose_best_action(
-            world_model, list(observation_buffer))
-
-        # --------------------------------------------------------------------
-        # 2. Gather display data BEFORE executing the action
+    
+        # 1. Plan action
+        best_action, (rew0, rew1) = choose_best_action(world_model, list(observation_buffer))
+    
+        # 2. Estimate reward for current and predicted frames
         curr_obs     = observation_buffer[-1]
-        curr_reward  = clip_reward_batch(curr_obs.unsqueeze(0)).item()
-
-        pred_frame_0 = sample_next_obs(world_model, observation_buffer,
-                                       DISCRETE_ACTIONS[0])
-        pred_frame_1 = sample_next_obs(world_model, observation_buffer,
-                                       DISCRETE_ACTIONS[1])
-        pred_rew_0   = clip_reward_batch(pred_frame_0.unsqueeze(0)).item()
-        pred_rew_1   = clip_reward_batch(pred_frame_1.unsqueeze(0)).item()
-
-        # --------------------------------------------------------------------
-        # 3. Show everything & pause
-        review_step(curr_obs, curr_reward,
-                    (pred_frame_0, pred_frame_1),
-                    (pred_rew_0,  pred_rew_1),
-                    best_action)
-
-        # --------------------------------------------------------------------
-        # 4. Apply chosen action
+        curr_reward  = clip_reward_single(curr_obs)
+    
+        pred_tensor_0 = sample_next_obs(world_model, observation_buffer, DISCRETE_ACTIONS[0])
+        pred_tensor_1 = sample_next_obs(world_model, observation_buffer, DISCRETE_ACTIONS[1])
+        pred_rew_0    = clip_reward_single(pred_tensor_0)
+        pred_rew_1    = clip_reward_single(pred_tensor_1)
+    
+        # 3. Display for review
+        review_step(curr_obs, curr_reward, (pred_tensor_0, pred_tensor_1), (pred_rew_0, pred_rew_1), best_action)
+    
+        # 4. Apply action
         apply_action_real(best_action)
-
-        # --------------------------------------------------------------------
+    
         # 5. Observe next real frame
         next_obs = get_observation_real()
         if next_obs is not None:
@@ -593,139 +629,6 @@ finally:
         remote_robot.cleanup()
     print(f"Finished after {step_count} steps "
           f"({time.time()-start_wall_ts:.1f}s).")
-
-
-# In[8]:
-
-
-print("Starting Continuous MPC Control Loop...")
-# --- Initialize Observation Buffers ---
-# Use the globally determined NUM_PREV_FRAMES
-observation_buffer = deque(maxlen=NUM_PREV_FRAMES + 1)
-visualization_buffer = deque(maxlen=VISUALIZATION_BUFFER_SIZE) # For storing recent frames for display
-
-print(f"Collecting {NUM_PREV_FRAMES + 1} initial observations...")
-initial_obs_collected = 0
-while initial_obs_collected < NUM_PREV_FRAMES + 1:
-    obs = get_observation_real()
-    if obs is not None:
-        observation_buffer.append(obs) # Add tensor (C, H, W)
-        visualization_buffer.append(obs.cpu().numpy()) # Add numpy version for vis
-        initial_obs_collected += 1
-        print(f"Collected initial observation {initial_obs_collected}/{NUM_PREV_FRAMES + 1}")
-    else:
-        print("Failed to get initial observation, retrying...")
-        time.sleep(0.5)
-    # Add a small delay to avoid overwhelming the server/network
-    time.sleep(0.05) # Shorter delay between initial captures
-
-if len(observation_buffer) != NUM_PREV_FRAMES + 1:
-     print("Error: Could not collect enough initial observations. Exiting.")
-     if 'remote_robot' in locals() and remote_robot:
-         remote_robot.cleanup() # Use the cleanup method
-     sys.exit(1) # Exit script
-else:
-     print("Initial observation buffer filled. Starting continuous control.")
-
-
-# --- Main Control Loop ---
-step_count = 0
-start_run_time = time.time()
-try:
-    while True: # Run indefinitely until interrupted
-        step_start_time = time.time()
-
-        # Check RPyC connection before planning/acting
-        if remote_robot is None or remote_robot.conn is None or remote_robot.conn.closed:
-             logger.error("RPyC connection lost. Stopping control loop.")
-             break
-
-        step_count += 1
-        print(f"\n--- Step {step_count} ---") # **ADDED PRINT STATEMENT**
-
-        # 1. Plan the best action by comparing discrete options
-        print("Planning action...") # **ADDED PRINT STATEMENT**
-        plan_start_time = time.time()
-        # Pass the current buffer (as a list) to the optimizer/chooser
-        # **MODIFIED: Get predicted rewards back**
-        action_val, predicted_rewards_tuple = choose_best_action(world_model, list(observation_buffer))
-        plan_duration = time.time() - plan_start_time
-        print(f"Planning finished in {plan_duration:.3f}s") # **ADDED PRINT STATEMENT**
-
-        # 2. Apply the chosen action (right motor only) via RPyC
-        print(f"Applying action: {action_val:.1f}") # **ADDED PRINT STATEMENT**
-        apply_action_real(action_val)
-
-        # 3. Get the next observation via RPyC
-        # print("Getting next observation...") # Optional print
-        next_obs_tensor = get_observation_real()
-        if next_obs_tensor is None:
-            logger.warning("Failed to get observation after action. Continuing...")
-            # Decide how to handle: continue, retry, or stop?
-            # For now, we continue, but the observation buffer won't update correctly.
-            # Consider adding a retry mechanism or stopping the loop.
-            time.sleep(0.1) # Add a small delay if observation failed
-            continue # Skip buffer update if obs failed
-            # break # Option: Stop the loop on observation error
-        else:
-             # print("Observation received.") # Optional print
-             # Add new observation to buffers if successful
-             observation_buffer.append(next_obs_tensor)
-             visualization_buffer.append(next_obs_tensor.cpu().numpy()) # Store numpy version
-
-        step_duration = time.time() - step_start_time
-        # Print step info periodically or based on verbosity setting
-        # **MODIFIED: Print every step now for more detail**
-        print(f"Step {step_count} Summary | Plan Time: {plan_duration:.3f}s | Step Time: {step_duration:.3f}s | Chosen Action: R={action_val:.1f} | Pred Rewards (0.0, 0.1): ({predicted_rewards_tuple[0]:.3f}, {predicted_rewards_tuple[1]:.3f})")
-
-except KeyboardInterrupt:
-    print("\nKeyboardInterrupt received. Stopping control loop.")
-finally:
-    # --- Cleanup ---
-    print("Shutting down remote connection...")
-    if 'remote_robot' in locals() and remote_robot:
-        remote_robot.cleanup() # Use the cleanup method of RemoteJetBot
-    print("Remote connection closed.")
-    end_run_time = time.time()
-    total_duration = end_run_time - start_run_time
-    print(f"\n===== MPC Control Loop Finished =====")
-    print(f"Ran for {step_count} steps.")
-    if total_duration > 0:
-        print(f"Total Duration: {time.strftime('%H:%M:%S', time.gmtime(total_duration))}")
-
-
-# %% [markdown]
-# ## Results Visualization (Optional - Shows last frames)
-
-# %%
-# Visualize observations using denormalized images from the visualization buffer
-if visualization_buffer:
-    print(f"\nVisualizing last {len(visualization_buffer)} captured observations...")
-    vis_obs_np = np.array(visualization_buffer) # Shape: (num_steps, C, H, W)
-    num_obs_to_show = min(len(vis_obs_np), 10) # Show up to 10 last frames
-
-    fig, axes = plt.subplots(1, num_obs_to_show, figsize=(num_obs_to_show * 2.5, 3))
-    if num_obs_to_show == 1: axes = [axes] # Make iterable if only one subplot
-
-    # Get the indices for the last num_obs_to_show frames
-    start_vis_index = len(vis_obs_np) - num_obs_to_show
-
-    for i in range(num_obs_to_show):
-        obs_index = start_vis_index + i
-        obs_tensor = torch.from_numpy(vis_obs_np[obs_index]).float()
-        obs_denorm = denormalize(obs_tensor)
-        obs_img_display = obs_denorm.permute(1, 2, 0).cpu().numpy()
-        obs_img_display = np.clip(obs_img_display, 0, 1)
-
-        axes[i].imshow(obs_img_display)
-        # Title relative to the end of the run
-        axes[i].set_title(f"Step {step_count - num_obs_to_show + i + 1}")
-        axes[i].axis('off')
-    plt.suptitle(f"Last {num_obs_to_show} Observations")
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show()
-else:
-    print("No observation data captured in the visualization buffer.")
 
 
 # In[ ]:
