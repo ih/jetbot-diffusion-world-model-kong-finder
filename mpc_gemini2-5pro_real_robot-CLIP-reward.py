@@ -339,6 +339,7 @@ def apply_action_real(right_motor_action):
 
         # Wait for the frame delay *after* sending the command
         time.sleep(REAL_ROBOT_FRAME_DELAY)
+        remote_robot.set_motors(0.0, 0.0)
 
     except Exception as e:
         logger.error(f"Error during RPyC apply_action_real: {e}")
@@ -596,9 +597,21 @@ try:
         step_count += 1
         print(f"\n─── Step {step_count} ───")
     
+        # --------------------------------------------------------------------
+        # 0. Observe before planning
+        obs = get_observation_real()
+        if obs is None:
+            logger.warning("Failed to grab frame. Skipping this step.")
+            continue
+    
+        observation_buffer.append(obs)
+        visualization_buffer.append(obs.cpu().numpy())
+    
+        # --------------------------------------------------------------------
         # 1. Plan action
         best_action, (rew0, rew1) = choose_best_action(world_model, list(observation_buffer))
     
+        # --------------------------------------------------------------------
         # 2. Estimate reward for current and predicted frames
         curr_obs     = observation_buffer[-1]
         curr_reward  = clip_reward_single(curr_obs)
@@ -608,19 +621,16 @@ try:
         pred_rew_0    = clip_reward_single(pred_tensor_0)
         pred_rew_1    = clip_reward_single(pred_tensor_1)
     
+        # --------------------------------------------------------------------
         # 3. Display for review
-        review_step(curr_obs, curr_reward, (pred_tensor_0, pred_tensor_1), (pred_rew_0, pred_rew_1), best_action)
+        review_step(curr_obs, curr_reward,
+                    (pred_tensor_0, pred_tensor_1),
+                    (pred_rew_0,  pred_rew_1),
+                    best_action)
     
-        # 4. Apply action
+        # --------------------------------------------------------------------
+        # 4. Apply chosen action and wait for duration
         apply_action_real(best_action)
-    
-        # 5. Observe next real frame
-        next_obs = get_observation_real()
-        if next_obs is not None:
-            observation_buffer.append(next_obs)
-            visualization_buffer.append(next_obs.cpu().numpy())
-        else:
-            logger.warning("Failed to grab frame after action.")
 
 except KeyboardInterrupt:
     print("\nKeyboardInterrupt – exiting loop.")
