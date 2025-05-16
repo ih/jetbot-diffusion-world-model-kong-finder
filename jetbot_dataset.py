@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[11]:
+# In[1]:
 
 
 from torch.utils.data import Dataset, Subset
@@ -17,7 +17,7 @@ import pandas as pd
 import random
 
 
-# In[12]:
+# In[2]:
 
 
 class JetbotDataset(Dataset):
@@ -59,61 +59,42 @@ class JetbotDataset(Dataset):
 
     def _calculate_valid_indices(self):
         """
-        Determines indices `i` where the sequence from `i-num_prev_frames` to `i`
-        (inclusive) belongs entirely to the same recording session.
+        Valid START indices i such that
+           • i, i-stride, i-2*stride, … are in the same session
+           • stride == config.FRAME_STRIDE  (e.g. 6 for 5 Hz)
         """
-        valid_indices = []
-        if len(self.dataframe) <= self.num_prev_frames:
-             print("Warning: Not enough data in CSV for even one sequence with history.")
-             return []
-
-        for i in range(self.num_prev_frames, len(self.dataframe)):
-            current_session_id = self.dataframe.iloc[i]['session_id']
-            oldest_history_session_id = self.dataframe.iloc[i - self.num_prev_frames]['session_id']
-
-            if current_session_id == oldest_history_session_id:
-                valid_indices.append(i)
-
-        print(f"Total rows in CSV: {len(self.dataframe)}, Valid sequence start indices: {len(valid_indices)}")
-        if not valid_indices:
-             print("Warning: No valid sequences found. Check combined data or num_prev_frames.")
-        return valid_indices
+        stride = config.FRAME_STRIDE
+        valid = []
+        for i in range(self.num_prev_frames * stride, len(self.dataframe)):
+            if i % stride:                # keep only every Nth frame
+                continue
+            sess_now = self.dataframe.iloc[i]['session_id']
+            sess_hist = self.dataframe.iloc[i - self.num_prev_frames*stride]['session_id']
+            if sess_now == sess_hist:
+                valid.append(i)
+        return valid
 
     def __len__(self):
         return len(self.valid_indices)
 
     def __getitem__(self, idx):
-        """
-        Fetches a sequence ending at the frame corresponding to the idx-th valid index.
-        """
-        actual_idx = self.valid_indices[idx]
+        stride      = config.FRAME_STRIDE
+        actual_idx  = self.valid_indices[idx]
 
-        current_row = self.dataframe.iloc[actual_idx]
-        # Construct path relative to the main data_dir
-        current_image_path = os.path.join(self.data_dir, current_row['image_path'])
-        current_image = Image.open(current_image_path).convert("RGB")
-        current_action = current_row['action']
+        cur_row     = self.dataframe.iloc[actual_idx]
+        cur_img     = Image.open(os.path.join(self.data_dir, cur_row['image_path'])).convert("RGB")
+        action      = cur_row['action']
 
         prev_frames = []
-        for i in range(self.num_prev_frames):
-            prev_idx = actual_idx - (self.num_prev_frames - i)
-            prev_row = self.dataframe.iloc[prev_idx]
-            # Construct path relative to the main data_dir
-            prev_image_path = os.path.join(self.data_dir, prev_row['image_path'])
-            prev_image = Image.open(prev_image_path).convert("RGB")
-            if self.transform:
-                prev_image = self.transform(prev_image)
-            prev_frames.append(prev_image)
+        for n in range(self.num_prev_frames, 0, -1):
+            prev_row = self.dataframe.iloc[actual_idx - n*stride]
+            prev_img = Image.open(os.path.join(self.data_dir, prev_row['image_path'])).convert("RGB")
+            prev_frames.append(self.transform(prev_img) if self.transform else prev_img)
 
-        if self.transform:
-            current_image = self.transform(current_image)
-
-        if not prev_frames:
-             raise ValueError(f"Failed to collect previous frames for index {actual_idx}")
-
+        cur_img = self.transform(cur_img) if self.transform else cur_img
         prev_frames_tensor = torch.cat(prev_frames, dim=0)
 
-        return current_image, torch.tensor([current_action], dtype=torch.float32), prev_frames_tensor
+        return cur_img, torch.tensor([action], dtype=torch.float32), prev_frames_tensor
 
 def save_existing_split(train_dataset, test_dataset, filename="dataset_split.pth"):
     """Saves the indices of existing Subset objects to a file.
@@ -301,7 +282,7 @@ def split_train_test_by_session_id(dataset, train_split=0.8, seed=42):
     return train_subset, test_subset
 
 
-# In[15]:
+# In[3]:
 
 
 if __name__ == "__main__":
@@ -321,10 +302,10 @@ if __name__ == "__main__":
     # display_dataset_entry(test_dataset[40])
 
 
-# In[11]:
+# In[4]:
 
 
-
+display_dataset_entry(test_dataset[40])
 
 
 # In[ ]:

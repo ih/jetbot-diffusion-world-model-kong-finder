@@ -28,6 +28,13 @@ with Notebook():
 # In[2]:
 
 
+print(f"📏  Training at {config.TARGET_HZ} Hz  "
+      f"(keeping every {config.FRAME_STRIDE}ᵗʰ frame from 30 Hz logs)")
+
+
+# In[3]:
+
+
 # --- Diffusion Helpers ---
 def linear_beta_schedule(timesteps, beta_start, beta_end):
     return torch.linspace(beta_start, beta_end, timesteps)
@@ -385,7 +392,7 @@ def train(model, dataloader, optimizer, betas, alphas_cumprod, start_epoch, num_
     
 
 
-# In[3]:
+# In[4]:
 
 
 if __name__ == "__main__":

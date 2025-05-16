@@ -327,7 +327,7 @@ def test_multistep_prediction(
     # --- Display using Matplotlib ---
     if display:
         num_cols = num_steps + 1 # Initial frame + N predicted steps
-        fig, axes = plt.subplots(1, num_cols, figsize=(5 * num_cols, 5.5))
+        fig, axes = plt.subplots(1, num_cols, figsize=(2 * num_cols, 2.5))
 
         display_frame_pil(initial_frame_pil, axes[0], title="Initial Frame (t)") # Use internally generated PIL
 
@@ -528,7 +528,7 @@ current_tensor, _, prev_frames_tensor = entry
 display_dataset_entry(entry)
 
 # Create a sequence of actions
-actions = torch.tensor([[0.1], [0.1], [0.1], [0.1]], dtype=torch.float32)
+actions = torch.full((30, 1), 0.1, dtype=torch.float32)
 
 # Call the prediction function
 predicted_frames = test_multistep_prediction(

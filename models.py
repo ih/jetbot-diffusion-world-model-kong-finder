@@ -5,6 +5,13 @@ import torch.nn.functional as F
 import numpy as np
 import config
 
+def make_norm(channels):
+    if config.NORM == 'group':
+        groups = 32 if channels >= 32 else max(1, channels // 4)
+        return nn.GroupNorm(groups, channels)
+    else:                # default to batch
+        return nn.BatchNorm2d(channels)
+
 # --- Common Blocks (Keep these defined once) ---
 class SinusoidalPositionEmbeddings(nn.Module):
     # (Paste the code for SinusoidalPositionEmbeddings here)
@@ -34,15 +41,15 @@ class Block(nn.Module):
             self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
             self.transform = nn.Conv2d(out_ch, out_ch, 4, 2, 1)
         self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
-        self.bnorm1 = nn.BatchNorm2d(out_ch)
-        self.bnorm2 = nn.BatchNorm2d(out_ch)
+        self.norm1 = make_norm(out_ch)
+        self.norm2 = make_norm(out_ch)
         self.relu  = nn.ReLU()
     def forward(self, x, t_emb): # Accepts pre-computed embedding
-        h = self.bnorm1(self.relu(self.conv1(x)))
+        h = self.norm1(self.relu(self.conv1(x)))
         time_emb_proj = self.relu(self.time_mlp(t_emb))
         time_emb_proj = time_emb_proj[(..., ) + (None, ) * 2]
         h = h + time_emb_proj
-        h = self.bnorm2(self.relu(self.conv2(h)))
+        h = self.norm2(self.relu(self.conv2(h)))
         return self.transform(h)
 
 # --- Architecture Definitions ---
