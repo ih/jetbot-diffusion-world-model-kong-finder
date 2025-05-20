@@ -15,19 +15,19 @@ MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_
 
 
 # --- Model ---
-MODEL_ARCHITECTURE = 'SimpleUNetV1' # Name matching a class in models.py
-NORM = 'group'
+MODEL_ARCHITECTURE = 'SimpleUNetV2_Larger' # Name matching a class in models.py
+NORM = 'batch'
 # --- Training ---
 BATCH_SIZE = 4
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 5e-5
 NUM_EPOCHS = 1000  # Probably don't need this in the testing notebook
 NUM_TIMESTEPS = 1000
 BETA_START = 1e-4
 BETA_END = 0.02
-USE_FP16 = True
+USE_FP16 = False
 ACCUMULATION_STEPS = 4
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_SimpleUnetV1')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_SimpleUnetV2_blockadagn2')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')

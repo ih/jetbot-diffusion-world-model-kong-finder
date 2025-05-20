@@ -302,10 +302,10 @@ if __name__ == "__main__":
     # display_dataset_entry(test_dataset[40])
 
 
-# In[4]:
+# In[5]:
 
 
-display_dataset_entry(test_dataset[40])
+
 
 
 # In[ ]:

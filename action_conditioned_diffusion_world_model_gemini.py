@@ -228,7 +228,10 @@ def train(model, dataloader, optimizer, betas, alphas_cumprod, start_epoch, num_
                 x_offset += config.IMAGE_SIZE
                 new_im.paste(predicted_image, (x_offset, 0))
 
-                new_im.save(os.path.join(sample_dir, f"sample_epoch_{epoch+1}.png"))
+                new_im.save(os.path.join(
+                    sample_dir,
+                    f"sample_epoch_{epoch+1}_{time.strftime('%Y%m%d_%H%M%S')}.png"
+                ))
                 print(f"Saved sample image at epoch {epoch+1}")
 
             model.train()
@@ -416,6 +419,9 @@ if __name__ == "__main__":
         save_existing_split(train_dataset, test_dataset, config.SPLIT_DATASET_FILENAME)
     else:
         print("Loaded existing dataset split.")
+
+    print(len(dataset), len(dataset.valid_indices))  # should match
+    print(max(train_dataset.indices))  
     
     train_dataloader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False) # Batch size 1 for easier evaluation
@@ -543,22 +549,4 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.savefig(os.path.join(config.PLOT_DIR, "loss_plot_final.png"))  # Save to plot dir
     plt.close()
-
-
-# In[7]:
-
-
-config.SAMPLE_EVERY
-
-
-# In[44]:
-
-
-
-
-
-# In[ ]:
-
-
-
 

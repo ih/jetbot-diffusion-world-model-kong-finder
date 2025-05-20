@@ -1,6 +1,7 @@
 # models.py
 import torch
 import torch.nn as nn
+import torch.nn.init as init
 import torch.nn.functional as F
 import numpy as np
 import config
@@ -52,6 +53,72 @@ class Block(nn.Module):
         h = self.norm2(self.relu(self.conv2(h)))
         return self.transform(h)
 
+
+class BlockAdaGN(nn.Module):
+    """
+    Residual block with Adaptive Group Norm conditioning on (time ⊕ action ⊕ frame‑hist) embedding.
+
+    Parameters
+    ----------
+    in_ch     : int   – channels coming **into** the block
+    out_ch    : int   – channels produced **by** the block
+    cond_dim  : int   – dimension of the conditioning vector
+    up        : bool  – if True → up‑sample (ConvTranspose2d); else down‑sample
+    groups    : int   – max # groups for GroupNorm (capped by channel count)
+    """
+    def __init__(self, in_ch: int, out_ch: int, cond_dim: int, *,
+                 up: bool = False, groups: int = 32):
+        super().__init__()
+
+        # ---------- conditioning MLP (γ, β) ----------
+        self.cond_mlp = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(cond_dim, 2 * out_ch)
+        )
+        init.zeros_(self.cond_mlp[1].weight)
+        init.zeros_(self.cond_mlp[1].bias)
+
+        # ---------- main path ----------
+        in_main = 2 * in_ch if up else in_ch          # cat‑skip doubles chans in up‑path
+        self.conv1 = nn.Conv2d(in_main, out_ch, 3, 1, 1, bias=False)
+        init.zeros_(self.conv1.weight)               # start as ∼identity
+        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, 1, 1)
+
+        # spatial transform (↓ or ↑ by factor 2)
+        if up:
+            self.transform = nn.ConvTranspose2d(out_ch, out_ch, 4, 2, 1)
+        else:
+            self.transform = nn.Conv2d(out_ch, out_ch, 4, 2, 1)
+
+        # ---------- skip path ----------
+        if up:
+            self.skip = nn.ConvTranspose2d(in_main, out_ch, 4, 2, 1, bias=False)
+            init.zeros_(self.skip.weight)
+        else:
+            self.skip = nn.Conv2d(in_ch, out_ch, 1, 2, 0, bias=False)
+            init.zeros_(self.skip.weight)
+
+        # ---------- normalisation & activation ----------
+        g = min(groups, max(1, out_ch // 4))
+        self.gn1 = nn.GroupNorm(g, out_ch)
+        self.gn2 = nn.GroupNorm(g, out_ch)
+        self.act = nn.SiLU()
+
+    # ---------------------------------------------------------------------
+    def forward(self, x, cond_vec):
+        """
+        x         : (B, C, H, W) – feature map
+        cond_vec  : (B, cond_dim) – per‑sample conditioning vector
+        """
+        γβ = self.cond_mlp(cond_vec).view(x.size(0), 2, -1, 1, 1)
+        γ, β = γβ[:, 0], γβ[:, 1]
+
+        h = self.conv1(x)
+        h = self.act((1 + γ) * self.gn1(h) + β)      # AdaGN
+        h = self.act(self.gn2(self.conv2(h)))
+        h = self.transform(h)
+
+        return h + self.skip(x)
 # --- Architecture Definitions ---
 
 class SimpleUNetV1(nn.Module): # Your original smaller model
@@ -114,10 +181,10 @@ class SimpleUNetV2_Larger(nn.Module): # Your current larger model
         self.conv0 = nn.Conv2d(in_img_channels, down_channels[0], 3, padding=1)
         self.downs = nn.ModuleList([])
         for i in range(len(down_channels)-1):
-            self.downs.append(Block(down_channels[i], down_channels[i+1], effective_time_emb_dim))
+            self.downs.append(BlockAdaGN(down_channels[i], down_channels[i+1], effective_time_emb_dim))
         self.ups = nn.ModuleList([])
         for i in range(len(up_channels)-1):
-            self.ups.append(Block(up_channels[i], up_channels[i+1], effective_time_emb_dim, up=True))
+            self.ups.append(BlockAdaGN(up_channels[i], up_channels[i+1], effective_time_emb_dim, up=True))
         self.output = nn.Conv2d(up_channels[-1], image_channels, 1)
 
     def forward(self, x, timestep, action, prev_frames):

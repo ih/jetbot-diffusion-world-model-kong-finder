@@ -13,7 +13,7 @@ get_ipython().system('pip install importnb')
 get_ipython().system('pip install scikit-image')
 
 
-# In[1]:
+# In[3]:
 
 
 import torch
@@ -38,7 +38,7 @@ with Notebook():
     from jetbot_dataset import *
 
 
-# In[2]:
+# In[4]:
 
 
 def evaluate_model_quantitative(model, test_dataloader, betas, alphas_cumprod, num_timesteps, device, num_prev_frames, action_tolerance=1e-6):
@@ -225,7 +225,7 @@ def evaluate_model_quantitative(model, test_dataloader, betas, alphas_cumprod, n
     return avg_metrics
 
 
-# In[3]:
+# In[5]:
 
 
 # --- Helper Function for Displaying PIL Images in Subplots ---
@@ -384,7 +384,7 @@ def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
     return Subset(input_dataset, filtered_indices)
 
 
-# In[4]:
+# In[6]:
 
 
 # --- Automatic Checkpoint Loading Logic ---
@@ -476,7 +476,7 @@ else:
     print(f"Model Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
 
-# In[5]:
+# In[7]:
 
 
 model.eval()
@@ -496,39 +496,50 @@ alphas_cumprod = torch.cumprod(alphas, axis=0).to(config.DEVICE)
 dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
 
 
-# In[6]:
+# In[8]:
 
 
 train_dataset, test_dataset = load_train_test_split(dataset, config.SPLIT_DATASET_FILENAME)
 
 
-# In[7]:
+# In[9]:
+
+
+target_action = .1
+train_dataset_action_0_1 = filter_dataset_by_action(train_dataset, target_action)
+
+
+# In[10]:
 
 
 target_action = .1
 test_dataset_action_0_1 = filter_dataset_by_action(test_dataset, target_action)
 
 
-# In[8]:
+# In[11]:
 
 
 target_action = 0
 test_dataset_action_0 = filter_dataset_by_action(test_dataset, target_action)
 
 
-# In[9]:
+# In[12]:
 
 
-entry_indx = 375
-target_dataset = test_dataset_action_0_1
+entry_indx = 395
+target_dataset = train_dataset_action_0_1
 entry = target_dataset[entry_indx]
 current_tensor, _, prev_frames_tensor = entry 
 
 
 display_dataset_entry(entry)
 
+
+# In[15]:
+
+
 # Create a sequence of actions
-actions = torch.full((30, 1), 0.1, dtype=torch.float32)
+actions = torch.full((4, 1), 0.1, dtype=torch.float32)
 
 # Call the prediction function
 predicted_frames = test_multistep_prediction(
@@ -546,7 +557,7 @@ actual = target_dataset[entry_indx+config.NUM_PREV_FRAMES]
 display_dataset_entry(actual)
 
 
-# In[9]:
+# In[14]:
 
 
 subset_idx = 375
