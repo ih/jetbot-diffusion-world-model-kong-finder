@@ -5,6 +5,9 @@ import torch.nn.init as init
 import torch.nn.functional as F
 import numpy as np
 import config
+from importnb import Notebook
+with Notebook():
+    from diamond_models import Denoiser, DenoiserConfig, InnerModelConfig, DiffusionSampler, InnerModel, SigmaDistributionConfig, DiffusionSamplerConfig, Batch
 
 def make_norm(channels):
     if config.NORM == 'group':
@@ -286,12 +289,15 @@ MODEL_REGISTRY = {
     'SimpleUNetV2_Larger': SimpleUNetV2_Larger,
     'SimpleRewardEstimator': SimpleRewardEstimator,
     'RewardEstimatorResNet':  RewardEstimatorResNet,
+    'Denoiser': Denoiser,
     # Add other models here
 }
 
 def get_model(config):
     """Instantiates a model based on the configuration."""
     model_name = config.MODEL_ARCHITECTURE
+    
+
     if model_name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model architecture: {model_name}. Available: {list(MODEL_REGISTRY.keys())}")
 

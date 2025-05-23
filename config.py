@@ -9,13 +9,13 @@ DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 # DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
-IMAGE_SIZE = 224
+IMAGE_SIZE = 64
 NUM_PREV_FRAMES = 4
 MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_subset.csv") 
 
 
 # --- Model ---
-MODEL_ARCHITECTURE = 'SimpleUNetV2_Larger' # Name matching a class in models.py
+MODEL_ARCHITECTURE = 'Denoiser' # Name matching a class in models.py
 NORM = 'batch'
 # --- Training ---
 BATCH_SIZE = 4
@@ -27,7 +27,7 @@ BETA_END = 0.02
 USE_FP16 = False
 ACCUMULATION_STEPS = 4
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_SimpleUnetV2_blockadagn2')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
@@ -42,10 +42,42 @@ SPLIT_DATASET_FILENAME = 'dataset_split.pth'
 EARLY_STOPPING_PATIENCE = 5
 EARLY_STOPPING_PERCENTAGE = .1
 MIN_EPOCHS = 5
+
 # --- Data-rate control ----------------------------------------------------
 TARGET_HZ            = 5          # ← choose 5 or 10
 SOURCE_HZ            = 30         # how fast the robot actually logged
 FRAME_STRIDE         = SOURCE_HZ // TARGET_HZ   # 30→5 Hz => stride 6
+
+
+# Denoiser & InnerModel specific
+DM_SIGMA_DATA = 0.5
+DM_SIGMA_OFFSET_NOISE = 0.1
+DM_NOISE_PREVIOUS_OBS = True
+DM_IMG_CHANNELS = 3
+# DM_NUM_STEPS_CONDITIONING will use NUM_PREV_FRAMES, ensure NUM_PREV_FRAMES is defined above
+DM_NUM_STEPS_CONDITIONING = NUM_PREV_FRAMES # Or set a specific integer value if preferred
+DM_COND_CHANNELS = 256
+DM_UNET_DEPTHS = [2, 2, 2, 2]
+DM_UNET_CHANNELS = [128, 256, 512, 1024]
+DM_UNET_ATTN_DEPTHS = [False, False, True, True] # Boolean list
+DM_NUM_ACTIONS = 2 # Adjust this based on your JetBot's actual number of discrete actions
+DM_IS_UPSAMPLER = False
+DM_UPSAMPLING_FACTOR = None # Or an integer like 2, 4 if DM_IS_UPSAMPLER is True
+
+# Sampler specific (for inference/visualization)
+SAMPLER_NUM_STEPS = 50
+SAMPLER_SIGMA_MIN = 0.002
+SAMPLER_SIGMA_MAX = 80.0
+SAMPLER_RHO = 7.0
+
+# Training specific (GRAD_CLIP_VALUE might be new if not used before)
+GRAD_CLIP_VALUE = 1.0
+
+# Karras-style sigma distribution parameters for training (NEW)
+DM_SIGMA_P_MEAN = -1.2   # Log-mean of sigma distribution
+DM_SIGMA_P_STD = 1.2     # Log-std of sigma distribution
+DM_SIGMA_MIN_TRAIN = 0.002 # Min sigma during training
+DM_SIGMA_MAX_TRAIN = 80.0  # Max sigma during training
 
 
 
