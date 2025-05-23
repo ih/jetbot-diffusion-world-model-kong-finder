@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import os
 import pandas as pd
 import random
+from tqdm.auto import tqdm
 
 
 # In[2]:
@@ -280,6 +281,50 @@ def split_train_test_by_session_id(dataset, train_split=0.8, seed=42):
               "Check session distribution or data.")
 
     return train_subset, test_subset
+
+def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
+    """
+    Creates a Subset of a dataset containing only samples with specific actions.
+
+    Args:
+        input_dataset (torch.utils.data.Dataset): The dataset or subset to filter
+            (e.g., your train_dataset or test_dataset). It assumes the dataset's
+            __getitem__ returns (image, action_tensor, prev_frames).
+        target_actions (float or list/tuple of float): The action value(s) to keep.
+        tolerance (float): Tolerance for floating-point comparison of actions.
+
+    Returns:
+        torch.utils.data.Subset: A new subset containing only the samples
+                                 with the target action(s). Returns an empty
+                                 Subset if no matching samples are found.
+    """
+    if not isinstance(target_actions, (list, tuple)):
+        target_actions = [target_actions] # Ensure it's a list
+
+    print(f"Filtering dataset with {len(input_dataset)} samples for actions: {target_actions}")
+    filtered_indices = []
+    for i in tqdm(range(len(input_dataset)), desc="Filtering Dataset"):
+        try:
+            # Access the data point to get the action
+            # __getitem__ returns: image, action_tensor, prev_frames
+            _, action_tensor, _ = input_dataset[i]
+            action_value = action_tensor.item() # Get scalar value
+
+            # Check if the action matches any of the target actions within tolerance
+            for target in target_actions:
+                if abs(action_value - target) < tolerance:
+                    filtered_indices.append(i)
+                    break # No need to check other targets for this index
+        except Exception as e:
+            print(f"Warning: Error processing index {i} during filtering: {e}")
+            # Decide whether to skip or raise, depending on expected data integrity
+            continue
+
+    if not filtered_indices:
+        print(f"Warning: No samples found matching actions {target_actions}.")
+
+    print(f"Filtered down to {len(filtered_indices)} samples.")
+    return Subset(input_dataset, filtered_indices)
 
 
 # In[3]:

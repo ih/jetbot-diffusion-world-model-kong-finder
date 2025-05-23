@@ -13,7 +13,7 @@ get_ipython().system('pip install importnb')
 get_ipython().system('pip install scikit-image')
 
 
-# In[3]:
+# In[1]:
 
 
 import torch
@@ -476,7 +476,7 @@ else:
     print(f"Model Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
 
-# In[7]:
+# In[3]:
 
 
 model.eval()
@@ -492,14 +492,23 @@ else:
 alphas = (1. - betas).to(config.DEVICE)
 alphas_cumprod = torch.cumprod(alphas, axis=0).to(config.DEVICE)
 
+
+
+# In[4]:
+
+
 # --- Create Dataset and DataLoader ---
 dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
 
-
-# In[8]:
-
-
 train_dataset, test_dataset = load_train_test_split(dataset, config.SPLIT_DATASET_FILENAME)
+
+
+# In[6]:
+
+
+print(len(dataset))
+print(len(train_dataset))
+print(len(test_dataset))
 
 
 # In[9]:
