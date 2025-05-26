@@ -311,7 +311,7 @@ def test_multistep_prediction_diamond(
     return predicted_frames_pil
 
 
-# In[25]:
+# In[8]:
 
 
 def random_multistep(target_dataset):
@@ -337,10 +337,16 @@ def random_multistep(target_dataset):
     )    
 
 
-# In[28]:
+# In[9]:
 
 
-random_multistep(dataset_01)
+dataset_00 = filter_dataset_by_action(full_dataset, 0.0)
+
+
+# In[15]:
+
+
+random_multistep(dataset_00)
 
 
 # In[8]:

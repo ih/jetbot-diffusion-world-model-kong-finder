@@ -36,11 +36,11 @@ logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
 print("Imports successful.")
 
 
-# In[3]:
+# In[2]:
 
 
 # --- JetBot Server Connection ---
-JETBOT_SERVER_IP = "192.168.68.53" # <<< --- REPLACE WITH YOUR JETBOT'S ACTUAL IP ADDRESS
+JETBOT_SERVER_IP = "192.168.68.65" # <<< --- REPLACE WITH YOUR JETBOT'S ACTUAL IP ADDRESS
 JETBOT_SERVER_PORT = 18861
 
 # --- Device Setup ---
@@ -95,11 +95,11 @@ WAIT_TIME = 2.0
 
 print("Configuration loaded.")
 print(f"Number of previous frames (N): {NUM_PREV_FRAMES}")
+print(f"Planning Horizon (H): {HORIZON}")
 print(f"Discrete Actions: {DISCRETE_ACTIONS_VALUES} (Indices: {DISCRETE_ACTIONS_INDICES})")
 
 
-
-# In[4]:
+# In[3]:
 
 
 print("--- Loading Diamond World Model ---")
@@ -187,7 +187,7 @@ for param in denoiser.parameters():
     param.requires_grad = False
 
 
-# In[5]:
+# In[4]:
 
 
 print("--- Loading CLIP Reward Model ---")
@@ -234,7 +234,7 @@ print("Reward functions defined.")
 
 
 
-# In[7]:
+# In[11]:
 
 
 remote_robot = None
@@ -279,35 +279,28 @@ def apply_action_real(action_index):
 print("Robot control functions defined.")
 
 
-# In[8]:
+# In[6]:
 
 
 def format_prev_obs_diamond(obs_buffer):
     """Formats N frames for DiffusionSampler.sample input."""
-    # Takes N frames (excluding the last one) -> (1, N, C, H, W)
     prev_frames_list = list(obs_buffer)[:-1]
     return torch.stack(prev_frames_list, dim=0).unsqueeze(0).to(DEVICE)
 
 def format_prev_act_diamond(act_buffer):
     """Formats N actions for DiffusionSampler.sample input."""
-    # Takes N actions -> (1, N)
     return torch.tensor(list(act_buffer), dtype=torch.long).unsqueeze(0).to(DEVICE)
 
 def sample_next_obs_diamond(sampler, obs_buffer, act_buffer, next_action_index):
     """
     Predicts the next frame using DiffusionSampler.
-    It uses the *history* (obs_buffer, act_buffer) but the action passed
-    to the sampler is based on *next_action_index*, repeated N times,
-    as per the Diamond model training/testing structure.
+    It uses the *history* but conditions on the *next_action_index* repeated N times.
     """
     prev_obs_5d = format_prev_obs_diamond(obs_buffer)
-
-    # The sampler is conditioned by repeating the *next* action N times.
     prev_act_tensor = torch.full((1, NUM_PREV_FRAMES),
                                  fill_value=next_action_index,
                                  dtype=torch.long,
                                  device=DEVICE)
-
     with torch.no_grad():
         predicted_frame_tensor, _ = sampler.sample(
             prev_obs=prev_obs_5d, # (1, N, C, H, W)
@@ -315,60 +308,56 @@ def sample_next_obs_diamond(sampler, obs_buffer, act_buffer, next_action_index):
         )
     return predicted_frame_tensor.squeeze(0) # (C, H, W)
 
-
 def predict_rewards_diamond(sampler, initial_obs_buffer, initial_act_buffer):
     """
-    Predicts cumulative rewards for both discrete action sequences (0 and 1).
+    Predicts sequences of rewards and frames for both discrete actions.
+    Returns:
+        tuple: (rewards_0_list, rewards_1_list, frames_0_list, frames_1_list)
     """
-    rewards = {0: 0.0, 1: 0.0}
-    
+    rewards_lists = {0: [], 1: []}
+    frames_lists = {0: [], 1: []} # Store predicted frames
+
     for action_index in DISCRETE_ACTIONS_INDICES:
-        # Create copies to avoid modifying the real buffers
         hypothetical_obs = deque(initial_obs_buffer, maxlen=NUM_PREV_FRAMES + 1)
         hypothetical_act = deque(initial_act_buffer, maxlen=NUM_PREV_FRAMES)
-        cumulative_reward = 0.0
-
+        
         with torch.no_grad():
             for _ in range(HORIZON):
-                # The action for this step is fixed (0 or 1)
-                current_action = action_index
+                current_action = action_index # Fixed action for this sequence
 
-                # Predict next frame using the sampler
                 predicted_frame = sample_next_obs_diamond(
-                    sampler,
-                    hypothetical_obs,
-                    hypothetical_act,
-                    current_action
+                    sampler, hypothetical_obs, hypothetical_act, current_action
                 )
-
-                # Get reward for predicted frame
                 reward = clip_reward_single(predicted_frame)
-                cumulative_reward += reward
 
-                # Update hypothetical buffers
+                rewards_lists[action_index].append(reward)
+                frames_lists[action_index].append(predicted_frame.cpu()) # Store CPU tensor
+
                 hypothetical_obs.append(predicted_frame)
                 hypothetical_act.append(current_action)
-
-            rewards[action_index] = cumulative_reward
-            
-    return rewards[0], rewards[1]
+                
+    return rewards_lists[0], rewards_lists[1], frames_lists[0], frames_lists[1]
 
 
 def choose_best_action_diamond(sampler, current_obs_buffer, current_act_buffer):
     """
-    Chooses the best discrete action index (0 or 1) by predicting rewards.
+    Chooses the best action index and returns predicted sequences.
     """
     if len(current_obs_buffer) != NUM_PREV_FRAMES + 1:
         logger.error(f"Obs buffer needs {NUM_PREV_FRAMES + 1} frames, has {len(current_obs_buffer)}. Stopping.")
-        return DISCRETE_ACTIONS_INDICES[0], (-float('inf'), -float('inf'))
-
+        return DISCRETE_ACTIONS_INDICES[0], ([], []), ([], []) 
     if len(current_act_buffer) != NUM_PREV_FRAMES:
         logger.error(f"Act buffer needs {NUM_PREV_FRAMES} actions, has {len(current_act_buffer)}. Stopping.")
-        return DISCRETE_ACTIONS_INDICES[0], (-float('inf'), -float('inf'))
+        return DISCRETE_ACTIONS_INDICES[0], ([], []), ([], [])
 
-    rew0, rew1 = predict_rewards_diamond(sampler, current_obs_buffer, current_act_buffer)
+    rew0_list, rew1_list, frames0_list, frames1_list = predict_rewards_diamond(
+        sampler, current_obs_buffer, current_act_buffer
+    )
 
-    print(f"  Predicted Rewards -> Action 0 ({DISCRETE_ACTIONS_VALUES[0]:.1f}): {rew0:.4f} | Action 1 ({DISCRETE_ACTIONS_VALUES[1]:.1f}): {rew1:.4f}")
+    rew0 = sum(rew0_list) if rew0_list else -float('inf')
+    rew1 = sum(rew1_list) if rew1_list else -float('inf')
+
+    print(f"  Predicted Cum. Rewards -> Action 0: {rew0:.4f} | Action 1: {rew1:.4f}")
 
     if rew1 > rew0:
         best_action_index = DISCRETE_ACTIONS_INDICES[1]
@@ -376,7 +365,8 @@ def choose_best_action_diamond(sampler, current_obs_buffer, current_act_buffer):
         best_action_index = DISCRETE_ACTIONS_INDICES[0]
 
     print(f"  ==> Chosen Action Index: {best_action_index} (Value: {DISCRETE_ACTIONS_VALUES[best_action_index]:.1f})")
-    return best_action_index, (rew0, rew1)
+    
+    return best_action_index, (rew0_list, rew1_list), (frames0_list, frames1_list)
 
 print("MPC core functions defined.")
 
@@ -384,29 +374,69 @@ print("MPC core functions defined.")
 # In[9]:
 
 
-def review_step(curr_obs, curr_reward,
-                pred_frames_tuple, pred_rewards_tuple,
-                chosen_action_index):
+def review_step(initial_obs_buffer,
+                pred_rewards_0, pred_frames_0,
+                pred_rewards_1, pred_frames_1,
+                chosen_action_index, step_count):
     """
-    Display the current frame + one-step predictions, then wait.
+    Display the previous frames + current + full predicted horizons, then wait.
+    Adds action value to each predicted frame title.
     """
-    f0, f1 = pred_frames_tuple
-    r0, r1 = pred_rewards_tuple
-    a0, a1 = DISCRETE_ACTIONS_VALUES[0], DISCRETE_ACTIONS_VALUES[1]
+    N = NUM_PREV_FRAMES
+    H = HORIZON
+    a0_val, a1_val = DISCRETE_ACTIONS_VALUES[0], DISCRETE_ACTIONS_VALUES[1]
     chosen_value = DISCRETE_ACTIONS_VALUES[chosen_action_index]
 
-    imgs = [curr_obs, f0, f1]
-    titles = [f"Current (r={curr_reward:.3f})",
-              f"Next a={a0:.1f} (r={r0:.3f})",
-              f"Next a={a1:.1f} (r={r1:.3f})"]
+    # Get prev_frames (N frames) and current_frame (1 frame)
+    buffer_list = list(initial_obs_buffer)
+    prev_frames = buffer_list[:-1]
+    current_frame = buffer_list[-1]
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    for ax, img, title in zip(axes, imgs, titles):
-        img_disp = denormalize(img.detach().cpu())
-        ax.imshow(np.clip(img_disp.permute(1,2,0).numpy(), 0, 1))
-        ax.set_title(title); ax.axis("off")
-    plt.suptitle(f"Chosen action for *this* step → {chosen_value:.1f} (Index: {chosen_action_index})")
-    plt.tight_layout(rect=[0, 0.03, 1, 0.90])
+    # Determine grid size
+    num_cols = max(N + 1, H) # N previous + 1 current vs H horizon
+    fig, axes = plt.subplots(3, num_cols, figsize=(num_cols * 2.5, 8.5), squeeze=False)
+
+    plt.suptitle(f"Step {step_count} - Review (Chosen Action: {chosen_value:.1f})", fontsize=16, y=1.0)
+
+    # --- Row 1: Previous Frames + Current Frame ---
+    axes[0, 0].set_ylabel("History + Current", rotation=90, size='large', labelpad=20)
+    for i in range(num_cols):
+        axes[0, i].axis("off") # Turn off all first
+        if i < N: # Plot previous frames
+            img = denormalize(prev_frames[i].detach().cpu())
+            axes[0, i].imshow(np.clip(img.permute(1,2,0).numpy(), 0, 1))
+            axes[0, i].set_title(f"t-{N-i}")
+        elif i == N: # Plot current frame (at index N)
+            img = denormalize(current_frame.detach().cpu())
+            axes[0, i].imshow(np.clip(img.permute(1,2,0).numpy(), 0, 1))
+            axes[0, i].set_title("Current (t)")
+
+
+    # --- Row 2: Action 0 Prediction ---
+    action_seq_0_str = ",".join([f"{a0_val:.1f}"] * H)
+    axes[1, 0].set_ylabel(f"Pred. (A={action_seq_0_str})", rotation=90, size='large', labelpad=20)
+    for i in range(num_cols):
+        axes[1, i].axis("off") # Turn off all first
+        if i < H:
+            img = denormalize(pred_frames_0[i].detach().cpu())
+            rew = pred_rewards_0[i]
+            # MODIFIED LINE: Added Action to title
+            axes[1, i].imshow(np.clip(img.permute(1,2,0).numpy(), 0, 1))
+            axes[1, i].set_title(f"A={a0_val:.1f} | t+{i+1}\n(r={rew:.3f})") # Added Action & newline
+
+    # --- Row 3: Action 1 Prediction ---
+    action_seq_1_str = ",".join([f"{a1_val:.1f}"] * H)
+    axes[2, 0].set_ylabel(f"Pred. (A={action_seq_1_str})", rotation=90, size='large', labelpad=20)
+    for i in range(num_cols):
+        axes[2, i].axis("off") # Turn off all first
+        if i < H:
+            img = denormalize(pred_frames_1[i].detach().cpu())
+            rew = pred_rewards_1[i]
+            # MODIFIED LINE: Added Action to title
+            axes[2, i].imshow(np.clip(img.permute(1,2,0).numpy(), 0, 1))
+            axes[2, i].set_title(f"A={a1_val:.1f} | t+{i+1}\n(r={rew:.3f})") # Added Action & newline
+
+    plt.tight_layout(rect=[0.05, 0.03, 1, 0.95]) # Adjust layout
     plt.show()
 
     if ADVANCE_MODE == "keypress":
@@ -417,7 +447,7 @@ def review_step(curr_obs, curr_reward,
 print("Visualization function defined.")
 
 
-# In[10]:
+# In[12]:
 
 
 print("--- Starting MPC Control Loop (Diamond Model) ---")
@@ -453,52 +483,34 @@ try:
         print(f"\n─── Step {step_count} ───")
 
         # 1. Plan Action (based on current buffers)
-        best_action_idx, (pred_rew0_horizon, pred_rew1_horizon) = choose_best_action_diamond(
+        best_action_idx, (rew0_list, rew1_list), (frames0_list, frames1_list) = choose_best_action_diamond(
             diffusion_sampler,
             observation_buffer,
             action_buffer
         )
+        
+        # Check if planning failed (empty lists)
+        if not rew0_list and not rew1_list:
+            print("Planning failed, stopping.")
+            break
 
-        # 2. Get Real Observation & Reward *before* acting
-        current_obs = get_observation_real()
-        if current_obs is None:
-            logger.warning("Failed to grab frame. Skipping this step.")
-            # Optionally try to recover or stop
-            time.sleep(REAL_ROBOT_FRAME_DELAY)
-            continue
+        # 2. Display for review (Shows current history & future predictions)
+        review_step(observation_buffer, 
+                    rew0_list, frames0_list, 
+                    rew1_list, frames1_list, 
+                    best_action_idx, step_count)
 
-        current_reward = clip_reward_single(current_obs)
-
-        # 3. Predict next frames for visualization
-        pred_tensor_0 = sample_next_obs_diamond(diffusion_sampler, observation_buffer, action_buffer, DISCRETE_ACTIONS_INDICES[0])
-        pred_tensor_1 = sample_next_obs_diamond(diffusion_sampler, observation_buffer, action_buffer, DISCRETE_ACTIONS_INDICES[1])
-        pred_rew_0_step = clip_reward_single(pred_tensor_0)
-        pred_rew_1_step = clip_reward_single(pred_tensor_1)
-
-        # 4. Display for review
-        review_step(current_obs, current_reward,
-                    (pred_tensor_0, pred_tensor_1),
-                    (pred_rew_0_step, pred_rew_1_step),
-                    best_action_idx)
-
-        # 5. Apply chosen action
+        # 3. Apply chosen action
         print(f"  Applying Action Index: {best_action_idx} (Value: {DISCRETE_ACTIONS_VALUES[best_action_idx]:.1f})")
         apply_action_real(best_action_idx)
         
-        # 6. Get *new* observation *after* acting & Update Buffers
-        # We get the 'current_obs' *before* planning/reviewing, but apply action *after*.
-        # For the *next* step's planning, we need the frame *after* the action.
-        # We could get another frame here, but for 5Hz, get_observation_real() might be
-        # called again at the start of the next loop. Let's rely on the next loop's grab
-        # and update the buffers with the observation *before* the action and the action itself.
-        # This means the buffer always reflects the state *before* the last action was taken.
-        # Let's re-think: We need the observation buffer to reflect the LATEST state.
-        # We should get a *new* frame here AFTER acting.
+        # 4. Get *new* observation *after* acting & Update Buffers
         print("  Getting frame after action...")
         new_obs = get_observation_real()
         if new_obs is None:
-            logger.warning("Failed to grab frame *after* action. Using previous frame.")
-            new_obs = current_obs # Fallback
+            logger.warning("Failed to grab frame *after* action. Using previous frame as fallback.")
+            new_obs = observation_buffer[-1] # Use last known obs as fallback
+            # Consider stopping or trying again if this happens often.
 
         observation_buffer.append(new_obs)
         action_buffer.append(best_action_idx) # Update with the action just taken
