@@ -4,11 +4,11 @@ import torchvision.transforms as transforms
 # Keep data and output in a separate directory to make uploading code to Gemini easier
 AUXILIARY_DIR = r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux'
 # --- Data ---
-SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_session_data_two_actions')
+SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_laundry_session_data_two_actions')
 DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 # DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
-CSV_PATH = os.path.join(DATA_DIR, 'data.csv')
+CSV_PATH = os.path.join(DATA_DIR, 'laundry_data.csv')
 IMAGE_SIZE = 64
 NUM_PREV_FRAMES = 4
 MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_subset.csv") 

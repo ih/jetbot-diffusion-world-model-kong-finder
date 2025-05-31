@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[1]:
 
 
 import rpyc
@@ -22,13 +22,13 @@ import config
 
 
 # --- Setup Logging ---
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger('JetBotClient')
 
 # --- Image Transformation ---
 # Transformations *before* saving to disk (for consistency with training)
 transform = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
@@ -134,8 +134,8 @@ def record_data(jetbot, actions, target_fps, session_dir):
         target_interval = 1.0 / target_fps
         image_count = 0 # Counter *within* the session
 
-        for action, duration in actions:
-            print(f"  Starting action: {action} for duration: {duration:.2f}s")
+        for action_index, (action, duration) in enumerate(actions):
+            # print(f"  Starting action: {action} for duration: {duration:.2f}s")
             jetbot.set_motors(action, 0)
             start_time = time.time()
 
@@ -172,26 +172,32 @@ def record_data(jetbot, actions, target_fps, session_dir):
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 
-            print(f"  Finished action: {action}")
+            print(f"  Finished action: {action_index}")
 
     print(f"Session recording complete. Total images in session: {image_count}")
 
 
 
-# In[1]:
+# In[2]:
 
 
 # --- Configuration ---
-JETBOT_IP = '192.168.68.60'  # Replace with your Jetbot's IP address
+JETBOT_IP = '192.168.68.65'  # Replace with your Jetbot's IP address
 IMAGE_SIZE = 224  # Use 224x224 images, don't use constant from config file since there may be resizing, or rename this and put it there
 TARGET_FPS = 30
-POSSIBLE_SPEEDS = [0.0, 0.1]
-MIN_DURATION = 2.0  # Seconds
-MAX_DURATION = 5.0  # Seconds
-NUM_ACTIONS = 20 #How many total actions to do
+POSSIBLE_SPEEDS = [0.0, 0.13]
+MIN_DURATION = 1.0  # Seconds
+MAX_DURATION = 2.0  # Seconds
+NUM_ACTIONS = 100 #How many total actions to do
 
 
 # In[3]:
+
+
+jetbot = RemoteJetBot(JETBOT_IP)
+
+
+# In[14]:
 
 
 jetbot = RemoteJetBot(JETBOT_IP)
@@ -221,19 +227,19 @@ jetbot = RemoteJetBot(JETBOT_IP)
 jetbot.get_frame()
 
 
-# In[11]:
+# In[8]:
 
 
-jetbot.set_motors(.115,0)
+jetbot.set_motors(.12,0)
 
 
-# In[12]:
+# In[9]:
 
 
 jetbot.set_motors(0,0)
 
 
-# In[8]:
+# In[10]:
 
 
 jetbot.cleanup()

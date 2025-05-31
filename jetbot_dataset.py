@@ -333,11 +333,12 @@ def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
 if __name__ == "__main__":
     transform = transforms.Compose([
         transforms.Resize((config.IMAGE_SIZE, config.IMAGE_SIZE)),
+        # transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     
-    dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
+    dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=transform)
     
 
     train_dataset, test_dataset = split_train_test_by_session_id(dataset)
@@ -347,10 +348,26 @@ if __name__ == "__main__":
     # display_dataset_entry(test_dataset[40])
 
 
-# In[5]:
+# In[9]:
 
 
+print(len(dataset))
+print(len(train_dataset))
+print(len(test_dataset))
 
+
+# In[ ]:
+
+
+print(len(dataset))
+print(len(train_dataset))
+print(len(test_dataset))
+
+
+# In[14]:
+
+
+display_dataset_entry(test_dataset[701])
 
 
 # In[ ]:

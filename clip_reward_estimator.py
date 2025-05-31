@@ -177,13 +177,13 @@ for p, prob in zip(prompts, probs[0]):
 # ## (Optional) Live JetBot Reward Stream
 # Uncomment and adapt the next cell to stream frames from your real JetBot and display the contrastive reward in real time.
 
-# In[8]:
+# In[3]:
 
 
 from jetbot_remote_client import RemoteJetBot
 import ipywidgets as widgets, asyncio, cv2
 #
-JETBOT_IP  = "192.168.68.60"          # change to your robot's IP
+JETBOT_IP  = "192.168.68.65"          # change to your robot's IP
 REFRESH_HZ = 15
 #
 bot = RemoteJetBot(JETBOT_IP)
