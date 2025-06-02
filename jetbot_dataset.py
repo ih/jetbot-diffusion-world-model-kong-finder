@@ -330,6 +330,57 @@ def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
 # In[3]:
 
 
+def create_small_debug_split(full_dataset, debug_train_size, debug_val_size, output_dir, debug_split_filename="dataset_split_debug.pth", seed=42):
+    """
+    Creates and saves a small, fixed-size train/validation split for fast testing.
+    Assumes debug_train_size + debug_val_size <= len(full_dataset).
+
+    Args:
+        full_dataset (Dataset): The complete dataset to sample from.
+        debug_train_size (int): The exact number of samples for the debug training set.
+        debug_val_size (int): The exact number of samples for the debug validation set.
+        output_dir (str): The directory where the split file will be saved.
+        debug_split_filename (str): The name of the file to save the split indices to.
+        seed (int): Random seed for reproducibility of the split.
+
+    Returns:
+        tuple(Subset, Subset): A tuple containing the debug_train_dataset and debug_val_dataset.
+    """
+    print(f"Creating new SMALL debug train/val split...")
+    print(f"Requested debug train size: {debug_train_size}, Requested debug val size: {debug_val_size}")
+
+    total_full_dataset_size = len(full_dataset)
+    
+    # Calculate the number of unused samples
+    unused_size = total_full_dataset_size - (debug_train_size + debug_val_size)
+    
+    # Perform the split using the exact requested sizes
+    debug_train_dataset, debug_val_dataset, _ = random_split(
+        full_dataset,
+        [debug_train_size, debug_val_size, unused_size],
+        generator=torch.Generator().manual_seed(seed)
+    )
+
+    print(f"Created debug_train_dataset with {len(debug_train_dataset)} samples.")
+    print(f"Created debug_val_dataset with {len(debug_val_dataset)} samples.")
+
+    # Save the indices of these small subsets
+    debug_split_file_path = os.path.join(output_dir, debug_split_filename)
+    torch.save({
+        'train_indices': debug_train_dataset.indices,
+        'val_indices': debug_val_dataset.indices,
+        'source_dataset_size': total_full_dataset_size,
+        'debug_train_size_used': len(debug_train_dataset),
+        'debug_val_size_used': len(debug_val_dataset)
+    }, debug_split_file_path)
+    print(f"Saved new DEBUG dataset split to {debug_split_file_path}")
+
+    return debug_train_dataset, debug_val_dataset
+
+
+# In[6]:
+
+
 if __name__ == "__main__":
     transform = transforms.Compose([
         transforms.Resize((config.IMAGE_SIZE, config.IMAGE_SIZE)),
@@ -340,34 +391,53 @@ if __name__ == "__main__":
     
     dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=transform)
     
+    split_file_path = os.path.join(config.OUTPUT_DIR, getattr(config, 'SPLIT_DATASET_FILENAME', 'dataset_split.pth'))
+    if os.path.exists(split_file_path):
+        print(f"Loading dataset split from {split_file_path}")
+        split_data = torch.load(split_file_path)
+        train_indices, val_indices = split_data['train_indices'], split_data['val_indices']
+        train_dataset = torch.utils.data.Subset(dataset, train_indices)
+        val_dataset = torch.utils.data.Subset(dataset, val_indices)
+    else:
+        print("Creating new train/val split...")
+        total_size = len(dataset)
+        train_size = int(total_size * 0.9)
+        val_size = total_size - train_size
+        train_dataset, val_dataset = random_split(dataset, [train_size, val_size]) # Using torch.random_split by default
+        torch.save({
+            'train_indices': train_dataset.indices,
+            'val_indices': val_dataset.indices,
+        }, split_file_path)
+        print(f"Saved new dataset split to {split_file_path}")
 
-    train_dataset, test_dataset = split_train_test_by_session_id(dataset)
+    # Define the small sizes for your debug split
+    desired_debug_train_size = 50
+    desired_debug_val_size = 10
+    train_debug_set, val_debug_set = create_small_debug_split(
+            dataset,
+            desired_debug_train_size,
+            desired_debug_val_size,
+            output_dir=config.OUTPUT_DIR, # Pass your config.OUTPUT_DIR
+        )
+    # train_dataset, test_dataset = split_train_test_by_session_id(dataset)
 
     # print(dataset[40])
     
     # display_dataset_entry(test_dataset[40])
 
 
-# In[9]:
+# print(len(dataset))
+# print(len(train_dataset))
+# print(len(val_dataset))
+# 
+# print("===DEBUG===")
+# print(len(train_debug_set))
+# print(len(val_debug_set))
+
+# In[12]:
 
 
-print(len(dataset))
-print(len(train_dataset))
-print(len(test_dataset))
-
-
-# In[ ]:
-
-
-print(len(dataset))
-print(len(train_dataset))
-print(len(test_dataset))
-
-
-# In[14]:
-
-
-display_dataset_entry(test_dataset[701])
+#display_dataset_entry(train_debug_set[25])
 
 
 # In[ ]:
