@@ -182,7 +182,7 @@ def record_data(jetbot, actions, target_fps, session_dir):
 
 
 # --- Configuration ---
-JETBOT_IP = '192.168.68.65'  # Replace with your Jetbot's IP address
+JETBOT_IP = '192.168.68.51'  # Replace with your Jetbot's IP address
 IMAGE_SIZE = 224  # Use 224x224 images, don't use constant from config file since there may be resizing, or rename this and put it there
 TARGET_FPS = 30
 POSSIBLE_SPEEDS = [0.0, 0.13]
@@ -191,13 +191,7 @@ MAX_DURATION = 2.0  # Seconds
 NUM_ACTIONS = 100 #How many total actions to do
 
 
-# In[3]:
-
-
-jetbot = RemoteJetBot(JETBOT_IP)
-
-
-# In[14]:
+# In[6]:
 
 
 jetbot = RemoteJetBot(JETBOT_IP)
@@ -213,6 +207,12 @@ try:
     record_data(jetbot, random_actions, TARGET_FPS, current_session_dir)
 finally:
     jetbot.cleanup()  # Stop motors and close connection
+
+
+# In[3]:
+
+
+jetbot = RemoteJetBot(JETBOT_IP)
 
 
 # In[5]:

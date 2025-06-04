@@ -40,7 +40,7 @@ print("Imports successful.")
 
 
 # --- JetBot Server Connection ---
-JETBOT_SERVER_IP = "192.168.68.65" # <<< --- REPLACE WITH YOUR JETBOT'S ACTUAL IP ADDRESS
+JETBOT_SERVER_IP = "192.168.68.51" # <<< --- REPLACE WITH YOUR JETBOT'S ACTUAL IP ADDRESS
 JETBOT_SERVER_PORT = 18861
 
 # --- Device Setup ---
@@ -59,7 +59,7 @@ N_ACTIONS_DIM = 1 # Dimensionality (always 1 for single motor control)
 # --- Discrete Actions ---
 # We use indices 0 and 1 for planning and map them to motor values
 DISCRETE_ACTIONS_INDICES = [0, 1]
-DISCRETE_ACTIONS_VALUES = [0.0, 0.1] # Corresponds to indices [0, 1]
+DISCRETE_ACTIONS_VALUES = [0.0, 0.13] # Corresponds to indices [0, 1]
 
 # --- Real Robot Parameters ---
 REAL_ROBOT_FRAME_DELAY = 1.0 / 5.0 # Target 5 Hz (Match training TARGET_HZ if possible)
@@ -234,7 +234,7 @@ print("Reward functions defined.")
 
 
 
-# In[11]:
+# In[6]:
 
 
 remote_robot = None
@@ -267,8 +267,8 @@ def apply_action_real(action_index):
         logger.error("RPyC connection not available for apply_action_real.")
         return
     try:
-        right_motor_speed = DISCRETE_ACTIONS_VALUES[action_index]
-        left_motor_speed = 0.0 # Keep left motor off
+        right_motor_speed = 0.0 # Keep right motor off
+        left_motor_speed = DISCRETE_ACTIONS_VALUES[action_index]
         remote_robot.set_motors(left_motor_speed, right_motor_speed)
         time.sleep(ACTION_DURATION) # Apply action for a duration
         remote_robot.set_motors(0.0, 0.0) # Stop motors
@@ -279,7 +279,7 @@ def apply_action_real(action_index):
 print("Robot control functions defined.")
 
 
-# In[6]:
+# In[7]:
 
 
 def format_prev_obs_diamond(obs_buffer):
@@ -371,7 +371,7 @@ def choose_best_action_diamond(sampler, current_obs_buffer, current_act_buffer):
 print("MPC core functions defined.")
 
 
-# In[9]:
+# In[8]:
 
 
 def review_step(initial_obs_buffer,
@@ -447,7 +447,7 @@ def review_step(initial_obs_buffer,
 print("Visualization function defined.")
 
 
-# In[12]:
+# In[ ]:
 
 
 print("--- Starting MPC Control Loop (Diamond Model) ---")

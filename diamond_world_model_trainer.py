@@ -533,7 +533,7 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
 
 
-# In[ ]:
+# In[12]:
 
 
 print("--- Starting Training Process ---")
