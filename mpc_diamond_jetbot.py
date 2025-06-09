@@ -108,7 +108,7 @@ denoiser = None
 diffusion_sampler = None
 
 # Find the best checkpoint (or fallback)
-best_checkpoint_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_train_loss.pth")
+best_checkpoint_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_val_loss.pth")
 latest_checkpoints = glob.glob(os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_epoch_*.pth'))
 
 if os.path.exists(best_checkpoint_path):
@@ -234,7 +234,7 @@ print("Reward functions defined.")
 
 
 
-# In[6]:
+# In[5]:
 
 
 remote_robot = None
@@ -279,7 +279,7 @@ def apply_action_real(action_index):
 print("Robot control functions defined.")
 
 
-# In[7]:
+# In[6]:
 
 
 def format_prev_obs_diamond(obs_buffer):
@@ -371,7 +371,7 @@ def choose_best_action_diamond(sampler, current_obs_buffer, current_act_buffer):
 print("MPC core functions defined.")
 
 
-# In[8]:
+# In[7]:
 
 
 def review_step(initial_obs_buffer,
@@ -447,7 +447,7 @@ def review_step(initial_obs_buffer,
 print("Visualization function defined.")
 
 
-# In[ ]:
+# In[8]:
 
 
 print("--- Starting MPC Control Loop (Diamond Model) ---")

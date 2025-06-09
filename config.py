@@ -8,7 +8,7 @@ SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_laundry_session_data_two_
 DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 # DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
-CSV_PATH = os.path.join(DATA_DIR, 'laundry_data.csv')
+CSV_PATH = os.path.join(DATA_DIR, 'laundry_data_30_sessions.csv')
 IMAGE_SIZE = 64
 NUM_PREV_FRAMES = 4
 MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_subset.csv") 
@@ -18,16 +18,19 @@ MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_
 MODEL_ARCHITECTURE = 'Denoiser' # Name matching a class in models.py
 NORM = 'batch'
 # --- Training ---
-BATCH_SIZE = 4
-LEARNING_RATE = 5e-5
+BATCH_SIZE = 2
+LEARNING_RATE = 1e-4
+LEARNING_RATE_WEIGHT_DECAY = 1e-2
+LEARNING_RATE_EPS = 1e-8
+LEARNING_RATE_WARMUP_STEPS = 100
 NUM_EPOCHS = 1000  # Probably don't need this in the testing notebook
 NUM_TIMESTEPS = 1000
 BETA_START = 1e-4
 BETA_END = 0.02
 USE_FP16 = True
-ACCUMULATION_STEPS = 4
+ACCUMULATION_STEPS = 64
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND_laundry')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND_laundry_30_sessions')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
@@ -56,7 +59,7 @@ DM_NOISE_PREVIOUS_OBS = True
 DM_IMG_CHANNELS = 3
 # DM_NUM_STEPS_CONDITIONING will use NUM_PREV_FRAMES, ensure NUM_PREV_FRAMES is defined above
 DM_NUM_STEPS_CONDITIONING = NUM_PREV_FRAMES # Or set a specific integer value if preferred
-DM_COND_CHANNELS = 256
+DM_COND_CHANNELS = 2048
 DM_UNET_DEPTHS = [2, 2, 2, 2]
 DM_UNET_CHANNELS = [128, 256, 512, 1024]
 DM_UNET_ATTN_DEPTHS = [False, False, True, True] # Boolean list
@@ -71,13 +74,13 @@ SAMPLER_SIGMA_MAX = 80.0
 SAMPLER_RHO = 7.0
 
 # Training specific (GRAD_CLIP_VALUE might be new if not used before)
-GRAD_CLIP_VALUE = 1.0
+GRAD_CLIP_VALUE = 10.0
 
 # Karras-style sigma distribution parameters for training (NEW)
 DM_SIGMA_P_MEAN = -1.2   # Log-mean of sigma distribution
 DM_SIGMA_P_STD = 1.2     # Log-std of sigma distribution
 DM_SIGMA_MIN_TRAIN = 0.002 # Min sigma during training
-DM_SIGMA_MAX_TRAIN = 80.0  # Max sigma during training
+DM_SIGMA_MAX_TRAIN = 20.0  # Max sigma during training
 
 
 
