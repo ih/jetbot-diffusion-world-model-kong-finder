@@ -13,7 +13,7 @@ get_ipython().system('pip install wandb')
 get_ipython().system('pip install --upgrade typing_extensions')
 
 
-# In[3]:
+# In[1]:
 
 
 import torch
@@ -31,6 +31,7 @@ from collections import deque # For moving average
 from dataclasses import dataclass 
 from typing import List, Optional, Dict, Any 
 import random
+from torch.optim.lr_scheduler import LambdaLR
 
 import wandb
 
@@ -48,15 +49,16 @@ from PIL import Image as PILImage
 print("Imports successful.")
 
 
-# In[4]:
+# In[2]:
 
 
 print("--- Configuration ---")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.backends.cudnn.benchmark = True
 print(f"Using device: {DEVICE}")
 
 
-# In[5]:
+# In[3]:
 
 
 # Denoiser & InnerModel specific
@@ -160,7 +162,7 @@ wandb.init(project=wandb_config['PROJECT_NAME'], config=wandb_config)
 print("Wandb initialized.")
 
 
-# In[6]:
+# In[4]:
 
 
 data_transform = config.TRANSFORM
@@ -193,8 +195,8 @@ else:
     }, split_file_path)
     print(f"Saved new dataset split to {split_file_path}")
 
-train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True, drop_last=True)
-val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True, drop_last=False)
+train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=8, pin_memory=True, drop_last=False)
 
 print(f"Training dataset size: {len(train_dataset)}")
 print(f"Validation dataset size: {len(val_dataset)}")
@@ -216,7 +218,7 @@ else:
     val_moving_subset = Subset(val_dataset, [])
 
 
-# In[7]:
+# In[5]:
 
 
 print("--- Initializing Models ---")
@@ -294,13 +296,27 @@ except Exception as e:
     raise
 
 
-# In[8]:
+# In[6]:
 
 
-print("--- Setting up Optimizer ---")
-optimizer = torch.optim.AdamW(denoiser.parameters(), lr=LEARNING_RATE)
-lr_scheduler = None # Placeholder
-print(f"Optimizer: AdamW with LR={LEARNING_RATE}")
+print("--- Setting up Optimizer and Scheduler ---")
+optimizer = torch.optim.AdamW(
+    denoiser.parameters(),
+    lr=config.LEARNING_RATE,
+    weight_decay=config.LEARNING_RATE_WEIGHT_DECAY,
+    eps=config.LEARNING_RATE_EPS
+)
+print(f"Optimizer: AdamW with LR={config.LEARNING_RATE}, Weight Decay={config.LEARNING_RATE_WEIGHT_DECAY}")
+
+# Learning Rate Scheduler with Warmup
+def lr_lambda(current_step: int):
+    if current_step < config.LEARNING_RATE_WARMUP_STEPS:
+        return float(current_step) / float(max(1, config.LEARNING_RATE_WARMUP_STEPS))
+    return 1.0
+
+lr_scheduler = LambdaLR(optimizer, lr_lambda)
+print(f"LR Scheduler: LambdaLR with {config.LEARNING_RATE_WARMUP_STEPS} warmup steps.")
+
 
 ### WANDB: Added wandb.watch() for gradient tracking ###
 # Watch the model to log gradients and parameters. log_freq can be adjusted.
@@ -311,21 +327,27 @@ wandb.watch(denoiser, log="all", log_freq=100) # Adjust log_freq as needed
 print("Wandb is watching the denoiser model for gradients and parameters.")
 
 
-# In[9]:
+# In[7]:
 
 
 START_EPOCH = 0
 BEST_TRAIN_LOSS_MA_FROM_CKPT = float('inf')
 PREVIOUS_BEST_TRAIN_MODEL_PATH = None
+BEST_VAL_LOSS_MA_FROM_CKPT = float('inf') # Added for validation loss tracking
+PREVIOUS_BEST_VAL_MODEL_PATH = None # Added for best validation model path
 
 # Correctly use LOAD_CHECKPOINT from config.py for the specific path
 load_path_config = config.LOAD_CHECKPOINT 
 best_train_loss_model_default_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_train_loss.pth")
+best_val_loss_model_default_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_val_loss.pth") # Added for val loss checkpoint
 
 load_path = load_path_config
 if load_path: # If a specific path is set in config, use it
     print(f"Attempting to load checkpoint from config.LOAD_CHECKPOINT: {load_path}")
-elif os.path.exists(best_train_loss_model_default_path): # Else, try the default best
+elif os.path.exists(best_val_loss_model_default_path): # Else, try the default best val loss model
+    load_path = best_val_loss_model_default_path
+    print(f"No specific checkpoint in config.LOAD_CHECKPOINT. Found existing best_val_loss model: {load_path}")
+elif os.path.exists(best_train_loss_model_default_path): # Else, try the default best train loss model
     load_path = best_train_loss_model_default_path
     print(f"No specific checkpoint in config.LOAD_CHECKPOINT. Found existing best_train_loss model: {load_path}")
 
@@ -338,20 +360,28 @@ if load_path and os.path.exists(load_path):
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         START_EPOCH = checkpoint.get('epoch', 0) + 1
         BEST_TRAIN_LOSS_MA_FROM_CKPT = checkpoint.get('best_train_loss_ma', float('inf'))
-        if load_path.endswith("denoiser_model_best_train_loss.pth"): # Ensure we track the correct one
+        BEST_VAL_LOSS_MA_FROM_CKPT = checkpoint.get('best_val_loss_ma', float('inf')) # Load best_val_loss_ma
+        if load_path.endswith("denoiser_model_best_train_loss.pth"): 
             PREVIOUS_BEST_TRAIN_MODEL_PATH = load_path
-        print(f"Resuming training from epoch {START_EPOCH}. Last best train_loss_ma: {BEST_TRAIN_LOSS_MA_FROM_CKPT:.6f}")
+        elif load_path.endswith("denoiser_model_best_val_loss.pth"): # Check if best val loss model is loaded
+            PREVIOUS_BEST_VAL_MODEL_PATH = load_path # Update path for best val model
+        print(f"Resuming training from epoch {START_EPOCH}. Last best train_loss_ma: {BEST_TRAIN_LOSS_MA_FROM_CKPT:.6f}, Last best val_loss_ma: {BEST_VAL_LOSS_MA_FROM_CKPT:.6f}")
     except Exception as e:
         print(f"Error loading checkpoint: {e}. Starting from scratch.")
-        START_EPOCH = 0; BEST_TRAIN_LOSS_MA_FROM_CKPT = float('inf')
+        START_EPOCH = 0
+        BEST_TRAIN_LOSS_MA_FROM_CKPT = float('inf')
+        BEST_VAL_LOSS_MA_FROM_CKPT = float('inf') # Reset on error
 else:
     if load_path_config: # If a path was specified but not found
         print(f"Specified checkpoint not found: {load_path_config}. Starting from scratch.")
     else: # No checkpoint specified and default best not found
         print("No checkpoint found or specified. Starting from scratch.")
+        # Ensure vars are initialized even if starting from scratch (though defaults are usually fine)
+        BEST_TRAIN_LOSS_MA_FROM_CKPT = float('inf')
+        BEST_VAL_LOSS_MA_FROM_CKPT = float('inf')
 
 
-# In[10]:
+# In[8]:
 
 
 def tensor_to_pil(tensor_img):
@@ -458,52 +488,65 @@ def prepare_single_sample_for_sampler(sample_data, device):
 print("Visualization helpers defined.")
 
 
-# In[11]:
+# In[9]:
 
 
-def train_denoiser_epoch(denoiser_model, train_dl, opt, grad_clip_val, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total): # Added num_batches args
+def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total):
     denoiser_model.train()
     total_loss = 0.0
     progress_bar = tqdm(train_dl, desc=f"Epoch {epoch_num_for_log} [Train]", leave=False)
-    
+
     num_prev_frames = config.NUM_PREV_FRAMES
-    c, h, w = DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
-    
+    c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
+    accumulation_steps = config.ACCUMULATION_STEPS
+
+    opt.zero_grad()
+
     for batch_idx, (target_img_batch, action_batch, prev_frames_flat_batch) in enumerate(progress_bar):
-        opt.zero_grad()
         current_batch_size = target_img_batch.shape[0]
         target_img_batch = target_img_batch.to(device)
         action_batch = action_batch.to(device)
         prev_frames_flat_batch = prev_frames_flat_batch.to(device)
+
         prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
         batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
         batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
         batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
-        current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding)
-        loss, logs = denoiser_model(current_batch_obj)
-        loss.backward()
-        if grad_clip_val > 0: torch.nn.utils.clip_grad_norm_(denoiser_model.parameters(), grad_clip_val)
-        opt.step()
-        total_loss += loss.item()
-        progress_bar.set_postfix({"Loss": loss.item(), "DenoisingLoss": logs.get("loss_denoising", "N/A")})
+        
+        # Corrected Batch instantiation
+        current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding, info=[{}] * current_batch_size)
 
-        if batch_idx % 10 == 0: # Log every 10 batches
-            # Corrected global step calculation using passed-in num_batches
+        loss, logs = denoiser_model(current_batch_obj)
+        loss = loss / accumulation_steps
+        loss.backward()
+
+        if (batch_idx + 1) % accumulation_steps == 0:
+            if grad_clip_val > 0:
+                torch.nn.utils.clip_grad_norm_(denoiser_model.parameters(), grad_clip_val)
+            opt.step()
+            scheduler.step()
+            opt.zero_grad()
+
+        total_loss += loss.item() * accumulation_steps
+        progress_bar.set_postfix({"Loss": loss.item() * accumulation_steps, "LR": scheduler.get_last_lr()[0]})
+
+        # Restored wandb logging
+        if batch_idx % 10 == 0:
             global_step = (epoch_num_for_log - 1) * (num_train_batches_total + num_val_batches_total) + batch_idx
             wandb.log({
-                "train_batch_loss": loss.item(),
+                "train_batch_loss": loss.item() * accumulation_steps, # Log un-normalized loss
                 "train_batch_denoising_loss": logs.get("loss_denoising"),
             }, step=global_step)
-    
-    return total_loss / len(train_dl) if len(train_dl) > 0 else 0
+
+    return total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
 
 @torch.no_grad()
-def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total): # Added num_batches args
+def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total):
     denoiser_model.eval()
     total_loss = 0.0
     progress_bar = tqdm(val_dl, desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
     num_prev_frames = config.NUM_PREV_FRAMES
-    c, h, w = DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
+    c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
 
     for batch_idx, (target_img_batch, action_batch, prev_frames_flat_batch) in enumerate(progress_bar):
         current_batch_size = target_img_batch.shape[0]
@@ -514,26 +557,29 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
         batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
         batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
         batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
-        current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding)
+        
+        # Corrected Batch instantiation
+        current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding, info=[{}]*current_batch_size)
+        
         loss, logs = denoiser_model(current_batch_obj)
         total_loss += loss.item()
-        progress_bar.set_postfix({"Val Loss": loss.item(), "DenoisingLoss": logs.get("loss_denoising", "N/A")})
-
-        if batch_idx % 10 == 0: # Log every 10 batches
-            # Corrected global step calculation using passed-in num_batches
+        progress_bar.set_postfix({"Val Loss": loss.item()})
+        
+        # Restored wandb logging
+        if batch_idx % 10 == 0:
             global_step = (epoch_num_for_log - 1) * (num_train_batches_total + num_val_batches_total) + num_train_batches_total + batch_idx
             wandb.log({
                 "val_batch_loss": loss.item(),
                 "val_batch_denoising_loss": logs.get("loss_denoising"),
              }, step=global_step)
-    
-    return total_loss / len(val_dl) if len(val_dl) > 0 else 0
+             
+    return total_loss / len(val_dl) if len(val_dl) > 0 else 0.0
 
 
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
 
 
-# In[12]:
+# In[10]:
 
 
 print("--- Starting Training Process ---")
@@ -548,6 +594,9 @@ epochs_without_improvement_train = 0
 previous_best_train_model_path = PREVIOUS_BEST_TRAIN_MODEL_PATH 
 
 val_loss_moving_avg_q = deque(maxlen=VAL_MOVING_AVG_WINDOW)
+best_val_loss_ma = BEST_VAL_LOSS_MA_FROM_CKPT # Initialize best_val_loss_ma
+previous_best_val_model_path = PREVIOUS_BEST_VAL_MODEL_PATH # Initialize previous_best_val_model_path
+
 final_epoch_completed = START_EPOCH -1 # Corrected initialization
 
 num_train_batches = len(train_dataloader)
@@ -559,15 +608,17 @@ for epoch in range(START_EPOCH, NUM_EPOCHS):
     # final_epoch_completed = epoch # Moved to end of loop for correct value if early stopping
 
     avg_train_loss = train_denoiser_epoch(
-        denoiser_model=denoiser, 
-        train_dl=train_dataloader, 
+        denoiser_model=denoiser,
+        train_dl=train_dataloader,
         opt=optimizer,
-        grad_clip_val=GRAD_CLIP_VALUE, 
-        device=DEVICE, 
+        scheduler=lr_scheduler,
+        grad_clip_val=config.GRAD_CLIP_VALUE,
+        device=DEVICE,
         epoch_num_for_log=current_epoch_num_for_log,
-        num_train_batches_total=num_train_batches, 
-        num_val_batches_total=num_val_batches      
+        num_train_batches_total=num_train_batches,
+        num_val_batches_total=num_val_batches
     )
+    
     all_train_losses_for_plot.append(avg_train_loss)
     train_loss_moving_avg_q.append(avg_train_loss)
     current_train_moving_avg = sum(train_loss_moving_avg_q) / len(train_loss_moving_avg_q) if train_loss_moving_avg_q else float('inf')
@@ -597,11 +648,36 @@ for epoch in range(START_EPOCH, NUM_EPOCHS):
         "train_loss_ma": current_train_moving_avg,
         "avg_val_loss": avg_val_loss,
         "val_loss_ma": current_val_moving_avg,
+        "best_val_loss_ma_so_far": best_val_loss_ma, # Log best val loss MA so far
         "epoch_duration_sec": epoch_duration_seconds,
         "learning_rate": optimizer.param_groups[0]['lr']
     }
     
     if lr_scheduler: lr_scheduler.step(avg_val_loss if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) else None)
+
+    # Save model based on Validation Loss MA
+    if current_val_moving_avg < best_val_loss_ma:
+        improvement_val_over_absolute_best = (best_val_loss_ma - current_val_moving_avg) / abs(best_val_loss_ma + 1e-9) * 100
+        print(f"  Val Loss MA improved to {current_val_moving_avg:.6f} from {best_val_loss_ma:.6f} ({improvement_val_over_absolute_best:.2f}% improvement).")
+        best_val_loss_ma = current_val_moving_avg
+        new_best_val_model_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_val_loss.pth")
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': denoiser.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': avg_train_loss,
+            'val_loss': avg_val_loss,
+            'best_train_loss_ma': best_train_loss_ma, 
+            'best_val_loss_ma': best_val_loss_ma
+        }, new_best_val_model_path)
+        print(f"  Saved new best model (val loss MA) at epoch {current_epoch_num_for_log}")
+        if previous_best_val_model_path and previous_best_val_model_path != new_best_val_model_path and os.path.exists(previous_best_val_model_path):
+            try:
+                os.remove(previous_best_val_model_path)
+                print(f"  Deleted previous best val model: {previous_best_val_model_path}")
+            except OSError as e:
+                print(f"  Warning: Could not delete previous best val model '{previous_best_val_model_path}': {e}")
+        previous_best_val_model_path = new_best_val_model_path
 
     should_stop_early = False
     # Early stopping logic (using EARLY_STOPPING_MIN_EPOCHS correctly)
@@ -616,7 +692,8 @@ for epoch in range(START_EPOCH, NUM_EPOCHS):
             torch.save({
                 'epoch': epoch, 'model_state_dict': denoiser.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(), 'loss': avg_train_loss, 
-                'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma
+                'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma,
+                'best_val_loss_ma': best_val_loss_ma # Also save best_val_loss_ma when saving based on train loss
             }, new_best_model_path)
             print(f"  Saved new best model (train loss MA) at epoch {current_epoch_num_for_log}")
             if previous_best_train_model_path and previous_best_train_model_path != new_best_model_path and os.path.exists(previous_best_train_model_path):
@@ -656,7 +733,8 @@ for epoch in range(START_EPOCH, NUM_EPOCHS):
              torch.save({
                 'epoch': epoch, 'model_state_dict': denoiser.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(), 'loss': avg_train_loss,
-                'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma # Save current best_train_loss_ma
+                'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma, # Save current best_train_loss_ma
+                'best_val_loss_ma': best_val_loss_ma # Also save best_val_loss_ma for regular epoch saves
             }, os.path.join(config.CHECKPOINT_DIR, f"denoiser_model_epoch_{current_epoch_num_for_log:04d}.pth"))
              print(f"Saved model checkpoint at epoch {current_epoch_num_for_log}")
     
