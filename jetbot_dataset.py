@@ -327,6 +327,31 @@ def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
     return Subset(input_dataset, filtered_indices)
 
 
+def filter_dataset_action_prev_zero(dataset, tolerance=1e-6):
+    """Create subset where current action is non-zero and at least one
+    previous frame action is zero."""
+    stride = config.FRAME_STRIDE
+    filtered_indices = []
+    for i in tqdm(range(len(dataset)), desc="Filtering Dataset"):
+        df_idx = dataset.valid_indices[i]
+        current = dataset.dataframe.iloc[df_idx]['action']
+        if abs(current) < tolerance:
+            continue
+        prev_zero = False
+        for n in range(1, dataset.num_prev_frames + 1):
+            prev_idx = df_idx - n * stride
+            prev_action = dataset.dataframe.iloc[prev_idx]['action']
+            if abs(prev_action) < tolerance:
+                prev_zero = True
+                break
+        if prev_zero:
+            filtered_indices.append(i)
+    if not filtered_indices:
+        print("Warning: No matching samples found.")
+    print(f"Filtered down to {len(filtered_indices)} samples.")
+    return Subset(dataset, filtered_indices)
+
+
 # In[3]:
 
 
