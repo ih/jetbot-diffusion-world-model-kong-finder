@@ -379,8 +379,10 @@ def review_step(initial_obs_buffer,
                 pred_rewards_1, pred_frames_1,
                 chosen_action_index, step_count):
     """
-    Display the previous frames + current + full predicted horizons, then wait.
-    Adds action value to each predicted frame title.
+    Display the previous frames + current + full predicted horizons and prompt
+    the user for which action to take when in keypress ADVANCE_MODE.
+    Returns the action index selected by the user (or the suggested action if
+    no override is given). Adds action value to each predicted frame title.
     """
     N = NUM_PREV_FRAMES
     H = HORIZON
@@ -439,10 +441,17 @@ def review_step(initial_obs_buffer,
     plt.tight_layout(rect=[0.05, 0.03, 1, 0.95]) # Adjust layout
     plt.show()
 
+    chosen_action = chosen_action_index
     if ADVANCE_MODE == "keypress":
-        _ = input("Press <Enter> to continue…")
+        user_inp = input("Press 'm' to MOVE, 'n' to NOT move, or <Enter> to accept suggestion: ").strip().lower()
+        if user_inp == 'm':
+            chosen_action = DISCRETE_ACTIONS_INDICES[1]
+        elif user_inp == 'n':
+            chosen_action = DISCRETE_ACTIONS_INDICES[0]
     else:
         time.sleep(WAIT_TIME)
+
+    return chosen_action
 
 print("Visualization function defined.")
 
@@ -494,11 +503,12 @@ try:
             print("Planning failed, stopping.")
             break
 
-        # 2. Display for review (Shows current history & future predictions)
-        review_step(observation_buffer, 
-                    rew0_list, frames0_list, 
-                    rew1_list, frames1_list, 
-                    best_action_idx, step_count)
+        # 2. Display for review (Shows current history & future predictions) and
+        #    optionally allow the user to override the suggested action.
+        best_action_idx = review_step(observation_buffer,
+                                      rew0_list, frames0_list,
+                                      rew1_list, frames1_list,
+                                      best_action_idx, step_count)
 
         # 3. Apply chosen action
         print(f"  Applying Action Index: {best_action_idx} (Value: {DISCRETE_ACTIONS_VALUES[best_action_idx]:.1f})")
