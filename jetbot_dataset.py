@@ -330,6 +330,36 @@ def filter_dataset_by_action(input_dataset, target_actions, tolerance=1e-6):
 # In[3]:
 
 
+def filter_dataset_action_prev_zero(dataset, tolerance=1e-6):
+    """
+    Returns a Subset with samples where the current action is non-zero
+    and at least one of the previous frame actions is zero.
+    """
+    stride = config.FRAME_STRIDE
+    filtered_indices = []
+    for i in tqdm(range(len(dataset)), desc="Filtering Dataset"):
+        df_idx = dataset.valid_indices[i]
+        current_action = dataset.dataframe.iloc[df_idx]['action']
+        if abs(current_action) < tolerance:
+            continue
+        prev_zero = False
+        for n in range(1, dataset.num_prev_frames + 1):
+            prev_idx = df_idx - n * stride
+            prev_action = dataset.dataframe.iloc[prev_idx]['action']
+            if abs(prev_action) < tolerance:
+                prev_zero = True
+                break
+        if prev_zero:
+            filtered_indices.append(i)
+    if not filtered_indices:
+        print('Warning: No matching samples found.')
+    print(f'Filtered down to {len(filtered_indices)} samples.')
+    return Subset(dataset, filtered_indices)
+
+
+# In[4]:
+
+
 def create_small_debug_split(full_dataset, debug_train_size, debug_val_size, output_dir, debug_split_filename="dataset_split_debug.pth", seed=42):
     """
     Creates and saves a small, fixed-size train/validation split for fast testing.
@@ -378,7 +408,7 @@ def create_small_debug_split(full_dataset, debug_train_size, debug_val_size, out
     return debug_train_dataset, debug_val_dataset
 
 
-# In[6]:
+# In[5]:
 
 
 if __name__ == "__main__":
@@ -411,19 +441,25 @@ if __name__ == "__main__":
         print(f"Saved new dataset split to {split_file_path}")
 
     # Define the small sizes for your debug split
-    desired_debug_train_size = 50
-    desired_debug_val_size = 10
-    train_debug_set, val_debug_set = create_small_debug_split(
-            dataset,
-            desired_debug_train_size,
-            desired_debug_val_size,
-            output_dir=config.OUTPUT_DIR, # Pass your config.OUTPUT_DIR
-        )
+    # desired_debug_train_size = 50
+    # desired_debug_val_size = 10
+    # train_debug_set, val_debug_set = create_small_debug_split(
+    #        dataset,
+    #        desired_debug_train_size,
+    #        desired_debug_val_size,
+    #        output_dir=config.OUTPUT_DIR, # Pass your config.OUTPUT_DIR
+    #    )
     # train_dataset, test_dataset = split_train_test_by_session_id(dataset)
 
     # print(dataset[40])
     
     # display_dataset_entry(test_dataset[40])
+
+
+# In[6]:
+
+
+# move_transition_dataset = filter_dataset_action_prev_zero(dataset)
 
 
 # print(len(dataset))
@@ -437,7 +473,7 @@ if __name__ == "__main__":
 # In[12]:
 
 
-#display_dataset_entry(train_debug_set[25])
+# display_dataset_entry(move_transition_dataset[605])
 
 
 # In[ ]:
