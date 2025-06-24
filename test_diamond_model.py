@@ -15,7 +15,7 @@ import random
 from importnb import Notebook
 import config  # Your configuration
 import torch.nn.functional as F
-from skimage.metrics import structural_similarity as ssim
+from torchmetrics.functional import structural_similarity_index_measure as ssim
 from torch.utils.data import DataLoader, Subset
 import pandas as pd
 from tqdm.auto import tqdm
