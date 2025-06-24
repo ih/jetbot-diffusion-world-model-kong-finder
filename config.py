@@ -14,9 +14,7 @@ NUM_PREV_FRAMES = 4
 MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_subset.csv")
 
 # --- Paths for Model Comparison ---
-MODEL_A_PATH = os.path.join(AUXILIARY_DIR, 'model_a.pth')
-MODEL_B_PATH = os.path.join(AUXILIARY_DIR, 'model_b.pth')
-HOLDOUT_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_holdout_data')
+HOLDOUT_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions_holdout')
 HOLDOUT_CSV_PATH = os.path.join(HOLDOUT_DATA_DIR, 'holdout.csv')
 
 
