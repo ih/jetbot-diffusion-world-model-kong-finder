@@ -419,7 +419,8 @@ if __name__ == "__main__":
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     
-    dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=transform)
+    #dataset = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=transform)
+    dataset = JetbotDataset(config.HOLDOUT_CSV_PATH, config.HOLDOUT_DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=transform)
     
     split_file_path = os.path.join(config.OUTPUT_DIR, getattr(config, 'SPLIT_DATASET_FILENAME', 'dataset_split.pth'))
     if os.path.exists(split_file_path):
@@ -456,10 +457,10 @@ if __name__ == "__main__":
     # display_dataset_entry(test_dataset[40])
 
 
-# In[6]:
+# In[8]:
 
 
-# move_transition_dataset = filter_dataset_action_prev_zero(dataset)
+#move_transition_dataset = filter_dataset_action_prev_zero(dataset)
 
 
 # print(len(dataset))
@@ -470,10 +471,10 @@ if __name__ == "__main__":
 # print(len(train_debug_set))
 # print(len(val_debug_set))
 
-# In[12]:
+# In[10]:
 
 
-# display_dataset_entry(move_transition_dataset[605])
+#display_dataset_entry(move_transition_dataset[150])
 
 
 # In[ ]:

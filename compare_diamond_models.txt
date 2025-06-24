@@ -1,0 +1,136 @@
+import torch
+from torch.utils.data import DataLoader
+from importnb import Notebook
+import torch.nn.functional as F
+from torchmetrics.functional import structural_similarity_index_measure as ssim
+import numpy as np
+from tqdm.auto import tqdm
+import config
+import models
+with Notebook():
+    from jetbot_dataset import JetbotDataset
+import wandb
+
+
+# Paths to the model checkpoints (update these as needed)
+MODEL_A_PATH = "C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\output_model_5hz_DIAMOND_laundry_30_sessions\checkpoints\denoiser_model_best_val_loss.pth"
+MODEL_B_PATH = 'model_b.pth'
+
+
+dataset = JetbotDataset(config.HOLDOUT_CSV_PATH, config.HOLDOUT_DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
+dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+print(f'Loaded holdout dataset with {len(dataset)} samples.')
+wandb.init(project="model_comparison")
+
+
+def load_sampler(checkpoint_path, device):
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    inner_cfg = models.InnerModelConfig(
+        img_channels=config.DM_IMG_CHANNELS,
+        num_steps_conditioning=config.DM_NUM_STEPS_CONDITIONING,
+        cond_channels=config.DM_COND_CHANNELS,
+        depths=config.DM_UNET_DEPTHS,
+        channels=config.DM_UNET_CHANNELS,
+        attn_depths=config.DM_UNET_ATTN_DEPTHS,
+        num_actions=config.DM_NUM_ACTIONS,
+        is_upsampler=config.DM_IS_UPSAMPLER
+    )
+    denoiser_cfg = models.DenoiserConfig(
+        inner_model=inner_cfg,
+        sigma_data=config.DM_SIGMA_DATA,
+        sigma_offset_noise=config.DM_SIGMA_OFFSET_NOISE,
+        noise_previous_obs=config.DM_NOISE_PREVIOUS_OBS,
+        upsampling_factor=config.DM_UPSAMPLING_FACTOR
+    )
+    denoiser = models.Denoiser(cfg=denoiser_cfg).to(device)
+    denoiser.load_state_dict(checkpoint['model_state_dict'])
+    denoiser.eval()
+    sampler_cfg = models.DiffusionSamplerConfig(
+        num_steps_denoising=config.SAMPLER_NUM_STEPS,
+        sigma_min=config.SAMPLER_SIGMA_MIN,
+        sigma_max=config.SAMPLER_SIGMA_MAX,
+        rho=config.SAMPLER_RHO,
+        order=getattr(config, 'SAMPLER_ORDER', 1),
+        s_churn=getattr(config, 'SAMPLER_S_CHURN', 0.0)
+    )
+    return models.DiffusionSampler(denoiser=denoiser, cfg=sampler_cfg)
+
+
+def evaluate_model_quantitative(sampler, dataloader, device, num_prev_frames, action_tolerance=1e-6):
+    sampler.denoiser.eval()
+    metrics={'overall':{'mse':[], 'ssim':[]}}
+    with torch.no_grad():
+        for current_img, action_tensor, prev_frames_tensor in tqdm(dataloader, desc='Evaluating'):
+            current_img=current_img.to(device)
+            action_tensor=action_tensor.to(device)
+            prev_frames_tensor=prev_frames_tensor.to(device)
+            prev_obs=prev_frames_tensor.view(1, num_prev_frames, current_img.shape[1], current_img.shape[2], current_img.shape[3])
+            prev_act=action_tensor.long().repeat(1, num_prev_frames)
+            pred,_=sampler.sample(prev_obs=prev_obs, prev_act=prev_act)
+            mse=F.mse_loss(pred, current_img).item()
+            pred_normalized=(pred.clamp(-1,1)+1)/2
+            gt_normalized=(current_img.clamp(-1,1)+1)/2
+            ssim_val=ssim(pred_normalized, gt_normalized, data_range=1.0).item()
+            metrics['overall']['mse'].append(mse)
+            metrics['overall']['ssim'].append(ssim_val)
+            key=0.0 if abs(action_tensor.item())<action_tolerance else float(action_tensor.item())
+            if key not in metrics:
+                metrics[key]={'mse':[], 'ssim':[]}
+            metrics[key]['mse'].append(mse)
+            metrics[key]['ssim'].append(ssim_val)
+    avg_metrics={}
+    for k,v in metrics.items():
+        if v['mse']:
+            avg_metrics[k]={
+                'avg_mse': float(np.mean(v['mse'])),
+                'avg_ssim': float(np.mean(v['ssim'])),
+                'count': len(v['mse'])
+            }
+        else:
+            avg_metrics[k]={'avg_mse': float('nan'), 'avg_ssim': float('nan'), 'count':0}
+    return avg_metrics
+
+
+def evaluate_models_alternating(sampler_a, sampler_b, dataloader, device, num_prev_frames):
+    metrics = {'A': {'mse': [], 'ssim': []}, 'B': {'mse': [], 'ssim': []}}
+    with torch.no_grad():
+        for idx, (current_img, action_tensor, prev_frames_tensor) in enumerate(tqdm(dataloader, desc='Evaluating')):
+            current_img = current_img.to(device)
+            action_tensor = action_tensor.to(device)
+            prev_frames_tensor = prev_frames_tensor.to(device)
+            prev_obs = prev_frames_tensor.view(1, num_prev_frames, current_img.shape[1], current_img.shape[2], current_img.shape[3])
+            prev_act = action_tensor.long().repeat(1, num_prev_frames)
+            pred_a, _ = sampler_a.sample(prev_obs=prev_obs, prev_act=prev_act)
+            pred_b, _ = sampler_b.sample(prev_obs=prev_obs, prev_act=prev_act)
+            for key, pred in [('A', pred_a), ('B', pred_b)]:
+                mse = F.mse_loss(pred, current_img).item()
+                pred_norm = (pred.clamp(-1,1)+1)/2
+                gt_norm = (current_img.clamp(-1,1)+1)/2
+                ssim_val = ssim(pred_norm, gt_norm, data_range=1.0).item()
+                metrics[key]['mse'].append(mse)
+                metrics[key]['ssim'].append(ssim_val)
+                avg_mse = float(np.mean(metrics[key]['mse']))
+                avg_ssim = float(np.mean(metrics[key]['ssim']))
+                print(f'Sample {idx} Model {key} -> MSE: {mse:.4f}, SSIM: {ssim_val:.4f}, Avg MSE: {avg_mse:.4f}, Avg SSIM: {avg_ssim:.4f}')
+                wandb.log({f"{key}/mse": mse, f"{key}/ssim": ssim_val, f"{key}/avg_mse": avg_mse, f"{key}/avg_ssim": avg_ssim, "sample_idx": idx})
+    results = {}
+    for key, vals in metrics.items():
+        if vals['mse']:
+            results[key] = {
+                'avg_mse': float(np.mean(vals['mse'])),
+                'avg_ssim': float(np.mean(vals['ssim'])),
+                'count': len(vals['mse'])
+            }
+        else:
+            results[key] = {'avg_mse': float('nan'), 'avg_ssim': float('nan'), 'count': 0}
+    return results
+
+
+device = config.DEVICE
+sampler_a = load_sampler(MODEL_A_PATH, device)
+sampler_b = load_sampler(MODEL_A_PATH, device)
+results = evaluate_models_alternating(sampler_a, sampler_b, dataloader, device, config.NUM_PREV_FRAMES)
+print('Model A Overall:', results.get('A'))
+print('Model B Overall:', results.get('B'))
+wandb.finish()
+

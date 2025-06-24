@@ -135,6 +135,16 @@ def combine_sessions_append(session_base_dir, aggregate_image_dir, aggregate_csv
 # In[3]:
 
 
+combine_sessions_append(
+    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_session_data_two_actions_holdout_laundry', 
+    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\images',
+    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\holdout.csv'
+)
+
+
+# In[3]:
+
+
 combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
 
 
