@@ -131,7 +131,7 @@ def record_data(jetbot, actions, target_fps, session_dir):
         image_count = 0 # Counter *within* the session
 
         for action, duration in actions:
-            print(f"  Starting action: {action} for duration: {duration:.2f}s")
+            # print(f"  Starting action: {action} for duration: {duration:.2f}s")
             jetbot.set_motors(action, 0)
             start_time = time.time()
 
