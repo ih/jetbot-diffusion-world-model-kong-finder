@@ -579,332 +579,419 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
 
 
+def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_epochs=None):
+    """Train a denoiser model with the provided dataloaders.
+
+    Returns the path to the best checkpoint saved during training."""
+    device = config.DEVICE
+    epochs = max_epochs or config.NUM_EPOCHS
+
+    inner_cfg = models.InnerModelConfig(
+        img_channels=config.DM_IMG_CHANNELS,
+        num_steps_conditioning=config.NUM_PREV_FRAMES,
+        cond_channels=config.DM_COND_CHANNELS,
+        depths=config.DM_UNET_DEPTHS,
+        channels=config.DM_UNET_CHANNELS,
+        attn_depths=config.DM_UNET_ATTN_DEPTHS,
+        num_actions=config.DM_NUM_ACTIONS,
+        is_upsampler=config.DM_IS_UPSAMPLER,
+    )
+    denoiser_cfg = models.DenoiserConfig(
+        inner_model=inner_cfg,
+        sigma_data=config.DM_SIGMA_DATA,
+        sigma_offset_noise=config.DM_SIGMA_OFFSET_NOISE,
+        noise_previous_obs=config.DM_NOISE_PREVIOUS_OBS,
+        upsampling_factor=config.DM_UPSAMPLING_FACTOR,
+    )
+    denoiser = models.Denoiser(cfg=denoiser_cfg).to(device)
+    sigma_cfg = models.SigmaDistributionConfig(
+        loc=config.DM_SIGMA_P_MEAN,
+        scale=config.DM_SIGMA_P_STD,
+        sigma_min=config.DM_SIGMA_MIN_TRAIN,
+        sigma_max=config.DM_SIGMA_MAX_TRAIN,
+    )
+    denoiser.setup_training(sigma_cfg)
+
+    if start_checkpoint and os.path.exists(start_checkpoint):
+        state = torch.load(start_checkpoint, map_location=device)
+        if 'model_state_dict' in state:
+            denoiser.load_state_dict(state['model_state_dict'])
+
+    opt = torch.optim.AdamW(
+        denoiser.parameters(),
+        lr=config.LEARNING_RATE,
+        weight_decay=config.LEARNING_RATE_WEIGHT_DECAY,
+        eps=config.LEARNING_RATE_EPS,
+    )
+
+    def lr_lambda(step: int):
+        warmup = config.LEARNING_RATE_WARMUP_STEPS
+        return float(step) / float(max(1, warmup)) if step < warmup else 1.0
+
+    scheduler = LambdaLR(opt, lr_lambda)
+
+    best_val = float("inf")
+    best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
+    patience = config.EARLY_STOPPING_PATIENCE
+    min_epochs = config.MIN_EPOCHS
+    wait = 0
+
+    num_train_batches = len(train_loader)
+    num_val_batches = len(val_loader)
+
+    for epoch in range(epochs):
+        ep = epoch + 1
+        train_denoiser_epoch(
+            denoiser, train_loader, opt, scheduler, config.GRAD_CLIP_VALUE,
+            device, ep, num_train_batches, num_val_batches
+        )
+        val_loss = validate_denoiser_epoch(
+            denoiser, val_loader, device, ep, num_train_batches, num_val_batches
+        )
+
+        if val_loss < best_val:
+            best_val = val_loss
+            torch.save({"model_state_dict": denoiser.state_dict()}, best_path)
+            wait = 0
+        else:
+            wait += 1
+
+        if ep >= min_epochs and wait >= patience:
+            break
+
+    return best_path
+
+
 # In[10]:
 
 
-print("--- Starting Training Process ---")
-overall_training_start_time = time.time() 
-
-all_train_losses_for_plot = [] 
-all_val_losses_for_plot = []   
-
-train_loss_moving_avg_q = deque(maxlen=TRAIN_MOVING_AVG_WINDOW)
-best_train_loss_ma = BEST_TRAIN_LOSS_MA_FROM_CKPT 
-epochs_without_improvement_train = 0
-previous_best_train_model_path = PREVIOUS_BEST_TRAIN_MODEL_PATH 
-
-val_loss_moving_avg_q = deque(maxlen=VAL_MOVING_AVG_WINDOW)
-best_val_loss_ma = BEST_VAL_LOSS_MA_FROM_CKPT # Initialize best_val_loss_ma
-previous_best_val_model_path = PREVIOUS_BEST_VAL_MODEL_PATH # Initialize previous_best_val_model_path
-
-final_epoch_completed = START_EPOCH -1 # Corrected initialization
-
-num_train_batches = len(train_dataloader)
-num_val_batches = len(val_dataloader)
-
-for epoch in range(START_EPOCH, NUM_EPOCHS):
-    epoch_start_time = time.time()
-    current_epoch_num_for_log = epoch + 1
-    # final_epoch_completed = epoch # Moved to end of loop for correct value if early stopping
-
-    avg_train_loss = train_denoiser_epoch(
-        denoiser_model=denoiser,
-        train_dl=train_dataloader,
-        opt=optimizer,
-        scheduler=lr_scheduler,
-        grad_clip_val=config.GRAD_CLIP_VALUE,
-        device=DEVICE,
-        epoch_num_for_log=current_epoch_num_for_log,
-        num_train_batches_total=num_train_batches,
-        num_val_batches_total=num_val_batches
-    )
+def _main_training():
+    print("--- Starting Training Process ---")
+    overall_training_start_time = time.time() 
     
-    all_train_losses_for_plot.append(avg_train_loss)
-    train_loss_moving_avg_q.append(avg_train_loss)
-    current_train_moving_avg = sum(train_loss_moving_avg_q) / len(train_loss_moving_avg_q) if train_loss_moving_avg_q else float('inf')
-
-    avg_val_loss = validate_denoiser_epoch(
-        denoiser_model=denoiser, 
-        val_dl=val_dataloader, 
-        device=DEVICE, 
-        epoch_num_for_log=current_epoch_num_for_log,
-        num_train_batches_total=num_train_batches, 
-        num_val_batches_total=num_val_batches      
-    )
-    all_val_losses_for_plot.append(avg_val_loss)
-    val_loss_moving_avg_q.append(avg_val_loss) 
-    current_val_moving_avg = sum(val_loss_moving_avg_q) / len(val_loss_moving_avg_q) if val_loss_moving_avg_q else float('inf')
-
-    epoch_duration_seconds = time.time() - epoch_start_time
-    epoch_duration_formatted = str(datetime.timedelta(seconds=epoch_duration_seconds))
-
-    print(f"Epoch {current_epoch_num_for_log}/{NUM_EPOCHS} - Train Loss: {avg_train_loss:.4f} (MA: {current_train_moving_avg:.4f}), Val Loss: {avg_val_loss:.4f} (MA: {current_val_moving_avg:.4f}), Duration: {epoch_duration_formatted}")
-
-    ### WANDB: Log epoch-level metrics ###
+    all_train_losses_for_plot = [] 
+    all_val_losses_for_plot = []   
     
-    wandb_log_data = {
-        "epoch": current_epoch_num_for_log,
-        "avg_train_loss": avg_train_loss,
-        "train_loss_ma": current_train_moving_avg,
-        "avg_val_loss": avg_val_loss,
-        "val_loss_ma": current_val_moving_avg,
-        "best_val_loss_ma_so_far": best_val_loss_ma, # Log best val loss MA so far
-        "epoch_duration_sec": epoch_duration_seconds,
-        "learning_rate": optimizer.param_groups[0]['lr']
-    }
+    train_loss_moving_avg_q = deque(maxlen=TRAIN_MOVING_AVG_WINDOW)
+    best_train_loss_ma = BEST_TRAIN_LOSS_MA_FROM_CKPT 
+    epochs_without_improvement_train = 0
+    previous_best_train_model_path = PREVIOUS_BEST_TRAIN_MODEL_PATH 
     
-    if lr_scheduler: lr_scheduler.step(avg_val_loss if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) else None)
-
-    # Save model based on Validation Loss MA
-    if current_val_moving_avg < best_val_loss_ma:
-        improvement_val_over_absolute_best = (best_val_loss_ma - current_val_moving_avg) / abs(best_val_loss_ma + 1e-9) * 100
-        print(f"  Val Loss MA improved to {current_val_moving_avg:.6f} from {best_val_loss_ma:.6f} ({improvement_val_over_absolute_best:.2f}% improvement).")
-        best_val_loss_ma = current_val_moving_avg
-        new_best_val_model_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_val_loss.pth")
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': denoiser.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'loss': avg_train_loss,
-            'val_loss': avg_val_loss,
-            'best_train_loss_ma': best_train_loss_ma, 
-            'best_val_loss_ma': best_val_loss_ma
-        }, new_best_val_model_path)
-        print(f"  Saved new best model (val loss MA) at epoch {current_epoch_num_for_log}")
-        if previous_best_val_model_path and previous_best_val_model_path != new_best_val_model_path and os.path.exists(previous_best_val_model_path):
-            try:
-                os.remove(previous_best_val_model_path)
-                print(f"  Deleted previous best val model: {previous_best_val_model_path}")
-            except OSError as e:
-                print(f"  Warning: Could not delete previous best val model '{previous_best_val_model_path}': {e}")
-        previous_best_val_model_path = new_best_val_model_path
-
-    should_stop_early = False
-    # Early stopping logic (using EARLY_STOPPING_MIN_EPOCHS correctly)
-    if current_epoch_num_for_log > EARLY_STOPPING_MIN_EPOCHS: # Check after min epochs completed
-        if current_train_moving_avg < best_train_loss_ma : 
-            # ... (rest of early stopping logic seems okay, ensure it uses current_epoch_num_for_log correctly)
-            improvement_over_absolute_best = (best_train_loss_ma - current_train_moving_avg) / abs(best_train_loss_ma + 1e-9) * 100
-            print(f"  Train Loss MA improved to {current_train_moving_avg:.6f} from {best_train_loss_ma:.6f} ({improvement_over_absolute_best:.2f}% improvement).")
-            best_train_loss_ma = current_train_moving_avg
-            epochs_without_improvement_train = 0
-            new_best_model_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_train_loss.pth")
-            torch.save({
-                'epoch': epoch, 'model_state_dict': denoiser.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(), 'loss': avg_train_loss, 
-                'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma,
-                'best_val_loss_ma': best_val_loss_ma # Also save best_val_loss_ma when saving based on train loss
-            }, new_best_model_path)
-            print(f"  Saved new best model (train loss MA) at epoch {current_epoch_num_for_log}")
-            if previous_best_train_model_path and previous_best_train_model_path != new_best_model_path and os.path.exists(previous_best_train_model_path):
-                try: os.remove(previous_best_train_model_path); print(f"  Deleted previous best train model: {previous_best_train_model_path}")
-                except OSError as e: print(f"  Warning: Could not delete previous best train model '{previous_best_train_model_path}': {e}")
-            previous_best_train_model_path = new_best_model_path
-        else: 
-            epochs_without_improvement_train += 1
-            print(f"  No improvement in train loss MA for {epochs_without_improvement_train} epoch(s). Best MA: {best_train_loss_ma:.6f}, Current MA: {current_train_moving_avg:.6f}")
-            if epochs_without_improvement_train >= EARLY_STOPPING_PATIENCE:
-                # ... (percentage improvement check)
-                idx_before_streak_started = len(all_train_losses_for_plot) - epochs_without_improvement_train -1 # Index of the epoch before non-improvement streak
-                # Ensure indices are valid
-                if idx_before_streak_started >= 0:
-                    # Calculate MA from historical_losses_for_ma of length TRAIN_MOVING_AVG_WINDOW ending at idx_before_streak_started
-                    historical_window_start = max(0, idx_before_streak_started - TRAIN_MOVING_AVG_WINDOW + 1)
-                    historical_losses_for_ma_calc = all_train_losses_for_plot[historical_window_start : idx_before_streak_started + 1]
-
-                    if len(historical_losses_for_ma_calc) >= TRAIN_MOVING_AVG_WINDOW // 2 : # Need at least half window
-                        historical_train_ma = sum(historical_losses_for_ma_calc) / len(historical_losses_for_ma_calc)
-                        # Improvement is positive if current_train_moving_avg is smaller
-                        percentage_improvement_vs_historical = (historical_train_ma - current_train_moving_avg) / abs(historical_train_ma + 1e-9) * 100
-                        print(f"  Patience met. Current Train MA: {current_train_moving_avg:.6f}, Historical MA before streak ({len(historical_losses_for_ma_calc)} epochs): {historical_train_ma:.6f}. Improvement: {percentage_improvement_vs_historical:.2f}%")
-                        if percentage_improvement_vs_historical < EARLY_STOPPING_PERCENTAGE:
-                            should_stop_early = True
-                            print(f"Early stopping triggered: Improvement {percentage_improvement_vs_historical:.2f}% < threshold {EARLY_STOPPING_PERCENTAGE}%.")
-                    else:
-                        print(f"  Patience met, but not enough historical data ({len(historical_losses_for_ma_calc)} points out of {TRAIN_MOVING_AVG_WINDOW}) to reliably calculate percentage improvement for early stopping.")
-                else:
-                     print(f"  Patience met, but not enough historical data (idx_before_streak_started = {idx_before_streak_started}) to compare.")
-
+    val_loss_moving_avg_q = deque(maxlen=VAL_MOVING_AVG_WINDOW)
+    best_val_loss_ma = BEST_VAL_LOSS_MA_FROM_CKPT # Initialize best_val_loss_ma
+    previous_best_val_model_path = PREVIOUS_BEST_VAL_MODEL_PATH # Initialize previous_best_val_model_path
     
-    if (current_epoch_num_for_log % SAVE_MODEL_EVERY == 0) or (epoch == NUM_EPOCHS - 1):
-        is_best_this_epoch = current_train_moving_avg == best_train_loss_ma # Check if current MA is the best overall
-        # Avoid saving regular checkpoint if it's also the best_train_loss epoch to prevent duplicate saves
-        if not (is_best_this_epoch and os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_train_loss.pth") == previous_best_train_model_path):
-             torch.save({
-                'epoch': epoch, 'model_state_dict': denoiser.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(), 'loss': avg_train_loss,
-                'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma, # Save current best_train_loss_ma
-                'best_val_loss_ma': best_val_loss_ma # Also save best_val_loss_ma for regular epoch saves
-            }, os.path.join(config.CHECKPOINT_DIR, f"denoiser_model_epoch_{current_epoch_num_for_log:04d}.pth"))
-             print(f"Saved model checkpoint at epoch {current_epoch_num_for_log}")
+    final_epoch_completed = START_EPOCH -1 # Corrected initialization
     
-    final_epoch_completed = epoch # Update last completed epoch here
-    if should_stop_early: break
-
-    if (current_epoch_num_for_log % SAMPLE_EVERY == 0) or (epoch == NUM_EPOCHS - 1) or should_stop_early:
-        print(f"Epoch {current_epoch_num_for_log}: Generating multiple visualization samples...")
-        denoiser.eval()
-        vis_wandb_log_data = {} # Accumulate images here for a single wandb.log call
-
-        # --- 1. Fixed Sample ---
-        fixed_sample_idx = wandb_config.get('FIXED_VIS_SAMPLE_IDX', 0)
-        if fixed_sample_idx < len(val_dataset):
-            print(f"  Generating fixed sample (index {fixed_sample_idx} from val_dataset)...")
-            fixed_sample_data = val_dataset[fixed_sample_idx]
-            prev_obs_fixed, prev_act_fixed, gt_fixed_batch, gt_prev_frames_fixed_seq = prepare_single_sample_for_sampler(fixed_sample_data, DEVICE) # gt_fixed_batch is [1,C,H,W]
-            with torch.no_grad():
-                generated_output_tuple_fixed = diffusion_sampler.sample(prev_obs=prev_obs_fixed, prev_act=prev_act_fixed)
-            
-            if generated_output_tuple_fixed:
-                generated_image_batch_fixed = generated_output_tuple_fixed[0] # This is [1, C, H, W]
-                if generated_image_batch_fixed.ndim == 4 and generated_image_batch_fixed.shape[0] == 1:
-                    generated_image_to_save_fixed = generated_image_batch_fixed[0] # Extract single image: [C, H, W]
-                else:
-                    generated_image_to_save_fixed = generated_image_batch_fixed # Fallback, though should be 4D
+    num_train_batches = len(train_dataloader)
+    num_val_batches = len(val_dataloader)
     
-                gt_image_to_save_fixed = gt_fixed_batch[0] # Extract single GT image: [C, H, W]
+    for epoch in range(START_EPOCH, NUM_EPOCHS):
+        epoch_start_time = time.time()
+        current_epoch_num_for_log = epoch + 1
+        # final_epoch_completed = epoch # Moved to end of loop for correct value if early stopping
     
-                vis_path_fixed = save_visualization_samples(
-                    generated_image_to_save_fixed, # Should be [C,H,W]
-                    gt_image_to_save_fixed,        # Should be [C,H,W]
-                    gt_prev_frames_fixed_seq,
-                    current_epoch_num_for_log,
-                    config.SAMPLE_DIR,
-                    prefix=f"val_vis_fixed_idx{fixed_sample_idx}"
-                )
-                if vis_path_fixed and wandb.run:
-                    vis_wandb_log_data[f"validation_samples/fixed_idx_{fixed_sample_idx}"] = wandb.Image(vis_path_fixed, caption=f"Epoch {current_epoch_num_for_log} Fixed Sample (Val Idx {fixed_sample_idx})")
-            else:
-                print("  Warning: Sampler did not return output for fixed sample.")
-        else:
-            print(f"  Warning: FIXED_SAMPLE_IDX {fixed_sample_idx} is out of bounds for val_dataset (size {len(val_dataset)}). Skipping fixed sample.")
-    
-        # --- 2. Random Stopped Sample (Action 0.0) ---
-        if len(val_stopped_subset) > 0:
-            print("  Generating random stopped sample...")
-            random_stopped_idx_in_subset = random.randint(0, len(val_stopped_subset) - 1)
-            stopped_sample_data = val_stopped_subset[random_stopped_idx_in_subset]
-            prev_obs_stopped, prev_act_stopped, gt_stopped_batch, gt_prev_frames_stopped_seq = prepare_single_sample_for_sampler(stopped_sample_data, DEVICE) # gt_stopped_batch is [1,C,H,W]
-            with torch.no_grad():
-                generated_output_tuple_stopped = diffusion_sampler.sample(prev_obs=prev_obs_stopped, prev_act=prev_act_stopped)
-            
-            if generated_output_tuple_stopped:
-                generated_image_batch_stopped = generated_output_tuple_stopped[0] # This is [1, C, H, W]
-                if generated_image_batch_stopped.ndim == 4 and generated_image_batch_stopped.shape[0] == 1:
-                    generated_image_to_save_stopped = generated_image_batch_stopped[0] # Extract single image: [C, H, W]
-                else:
-                    generated_image_to_save_stopped = generated_image_batch_stopped
-    
-                gt_image_to_save_stopped = gt_stopped_batch[0] # Extract single GT image: [C, H, W]
-    
-                vis_path_stopped = save_visualization_samples(
-                    generated_image_to_save_stopped, # Should be [C,H,W]
-                    gt_image_to_save_stopped,        # Should be [C,H,W]
-                    gt_prev_frames_stopped_seq,
-                    current_epoch_num_for_log,
-                    config.SAMPLE_DIR,
-                    prefix="val_vis_stopped_random"
-                )
-                if vis_path_stopped and wandb.run:
-                    vis_wandb_log_data["validation_samples/random_stopped"] = wandb.Image(vis_path_stopped, caption=f"Epoch {current_epoch_num_for_log} Random Stopped Sample")
-            else:
-                print("  Warning: Sampler did not return output for stopped sample.")
-        else:
-            print("  Warning: No stopped (action 0.0) samples found in validation set. Skipping random stopped sample.")
-    
-        # --- 3. Random Moving Sample ---
-        moving_action_val_vis = wandb_config.get('MOVING_ACTION_VALUE_FOR_VIS', 0.1)
-        if len(val_moving_subset) > 0:
-            print(f"  Generating random moving sample (action {moving_action_val_vis})...")
-            random_moving_idx_in_subset = random.randint(0, len(val_moving_subset) - 1)
-            moving_sample_data = val_moving_subset[random_moving_idx_in_subset]
-            prev_obs_moving, prev_act_moving, gt_moving_batch, gt_prev_frames_moving_seq = prepare_single_sample_for_sampler(moving_sample_data, DEVICE) # gt_moving_batch is [1,C,H,W]
-            with torch.no_grad():
-                generated_output_tuple_moving = diffusion_sampler.sample(prev_obs=prev_obs_moving, prev_act=prev_act_moving)
-    
-            if generated_output_tuple_moving:
-                generated_image_batch_moving = generated_output_tuple_moving[0] # This is [1, C, H, W]
-                if generated_image_batch_moving.ndim == 4 and generated_image_batch_moving.shape[0] == 1:
-                    generated_image_to_save_moving = generated_image_batch_moving[0] # Extract single image: [C, H, W]
-                else:
-                    generated_image_to_save_moving = generated_image_batch_moving
-    
-                gt_image_to_save_moving = gt_moving_batch[0] # Extract single GT image: [C, H, W]
-    
-                vis_path_moving = save_visualization_samples(
-                    generated_image_to_save_moving, # Should be [C,H,W]
-                    gt_image_to_save_moving,        # Should be [C,H,W]
-                    gt_prev_frames_moving_seq,
-                    current_epoch_num_for_log,
-                    config.SAMPLE_DIR,
-                    prefix=f"val_vis_moving_act{str(moving_action_val_vis).replace('.', 'p')}_random"
-                )
-                if vis_path_moving and wandb.run:
-                    vis_wandb_log_data[f"validation_samples/random_moving_act{str(moving_action_val_vis).replace('.', 'p')}"] = wandb.Image(vis_path_moving, caption=f"Epoch {current_epoch_num_for_log} Random Moving Sample (Action {moving_action_val_vis})")
-            else:
-                print("  Warning: Sampler did not return output for moving sample.")
-        else:
-            print(f"  Warning: No moving (action {moving_action_val_vis}) samples found in validation set. Skipping random moving sample.")
+        avg_train_loss = train_denoiser_epoch(
+            denoiser_model=denoiser,
+            train_dl=train_dataloader,
+            opt=optimizer,
+            scheduler=lr_scheduler,
+            grad_clip_val=config.GRAD_CLIP_VALUE,
+            device=DEVICE,
+            epoch_num_for_log=current_epoch_num_for_log,
+            num_train_batches_total=num_train_batches,
+            num_val_batches_total=num_val_batches
+        )
         
-        denoiser.train() # Set model back to training mode
-        # Log all accumulated data for this epoch (losses + images)
-        if wandb.run:
-            wandb.log({**wandb_log_data, **vis_wandb_log_data})
-    elif wandb.run: # If not sampling, still log epoch metrics
-         wandb.log(wandb_log_data)
+        all_train_losses_for_plot.append(avg_train_loss)
+        train_loss_moving_avg_q.append(avg_train_loss)
+        current_train_moving_avg = sum(train_loss_moving_avg_q) / len(train_loss_moving_avg_q) if train_loss_moving_avg_q else float('inf')
+    
+        avg_val_loss = validate_denoiser_epoch(
+            denoiser_model=denoiser, 
+            val_dl=val_dataloader, 
+            device=DEVICE, 
+            epoch_num_for_log=current_epoch_num_for_log,
+            num_train_batches_total=num_train_batches, 
+            num_val_batches_total=num_val_batches      
+        )
+        all_val_losses_for_plot.append(avg_val_loss)
+        val_loss_moving_avg_q.append(avg_val_loss) 
+        current_val_moving_avg = sum(val_loss_moving_avg_q) / len(val_loss_moving_avg_q) if val_loss_moving_avg_q else float('inf')
+    
+        epoch_duration_seconds = time.time() - epoch_start_time
+        epoch_duration_formatted = str(datetime.timedelta(seconds=epoch_duration_seconds))
+    
+        print(f"Epoch {current_epoch_num_for_log}/{NUM_EPOCHS} - Train Loss: {avg_train_loss:.4f} (MA: {current_train_moving_avg:.4f}), Val Loss: {avg_val_loss:.4f} (MA: {current_val_moving_avg:.4f}), Duration: {epoch_duration_formatted}")
+    
+        ### WANDB: Log epoch-level metrics ###
+        
+        wandb_log_data = {
+            "epoch": current_epoch_num_for_log,
+            "avg_train_loss": avg_train_loss,
+            "train_loss_ma": current_train_moving_avg,
+            "avg_val_loss": avg_val_loss,
+            "val_loss_ma": current_val_moving_avg,
+            "best_val_loss_ma_so_far": best_val_loss_ma, # Log best val loss MA so far
+            "epoch_duration_sec": epoch_duration_seconds,
+            "learning_rate": optimizer.param_groups[0]['lr']
+        }
+        
+        if lr_scheduler: lr_scheduler.step(avg_val_loss if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) else None)
+    
+        # Save model based on Validation Loss MA
+        if current_val_moving_avg < best_val_loss_ma:
+            improvement_val_over_absolute_best = (best_val_loss_ma - current_val_moving_avg) / abs(best_val_loss_ma + 1e-9) * 100
+            print(f"  Val Loss MA improved to {current_val_moving_avg:.6f} from {best_val_loss_ma:.6f} ({improvement_val_over_absolute_best:.2f}% improvement).")
+            best_val_loss_ma = current_val_moving_avg
+            new_best_val_model_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_val_loss.pth")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': denoiser.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': avg_train_loss,
+                'val_loss': avg_val_loss,
+                'best_train_loss_ma': best_train_loss_ma, 
+                'best_val_loss_ma': best_val_loss_ma
+            }, new_best_val_model_path)
+            print(f"  Saved new best model (val loss MA) at epoch {current_epoch_num_for_log}")
+            if previous_best_val_model_path and previous_best_val_model_path != new_best_val_model_path and os.path.exists(previous_best_val_model_path):
+                try:
+                    os.remove(previous_best_val_model_path)
+                    print(f"  Deleted previous best val model: {previous_best_val_model_path}")
+                except OSError as e:
+                    print(f"  Warning: Could not delete previous best val model '{previous_best_val_model_path}': {e}")
+            previous_best_val_model_path = new_best_val_model_path
+    
+        should_stop_early = False
+        # Early stopping logic (using EARLY_STOPPING_MIN_EPOCHS correctly)
+        if current_epoch_num_for_log > EARLY_STOPPING_MIN_EPOCHS: # Check after min epochs completed
+            if current_train_moving_avg < best_train_loss_ma : 
+                # ... (rest of early stopping logic seems okay, ensure it uses current_epoch_num_for_log correctly)
+                improvement_over_absolute_best = (best_train_loss_ma - current_train_moving_avg) / abs(best_train_loss_ma + 1e-9) * 100
+                print(f"  Train Loss MA improved to {current_train_moving_avg:.6f} from {best_train_loss_ma:.6f} ({improvement_over_absolute_best:.2f}% improvement).")
+                best_train_loss_ma = current_train_moving_avg
+                epochs_without_improvement_train = 0
+                new_best_model_path = os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_train_loss.pth")
+                torch.save({
+                    'epoch': epoch, 'model_state_dict': denoiser.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(), 'loss': avg_train_loss, 
+                    'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma,
+                    'best_val_loss_ma': best_val_loss_ma # Also save best_val_loss_ma when saving based on train loss
+                }, new_best_model_path)
+                print(f"  Saved new best model (train loss MA) at epoch {current_epoch_num_for_log}")
+                if previous_best_train_model_path and previous_best_train_model_path != new_best_model_path and os.path.exists(previous_best_train_model_path):
+                    try: os.remove(previous_best_train_model_path); print(f"  Deleted previous best train model: {previous_best_train_model_path}")
+                    except OSError as e: print(f"  Warning: Could not delete previous best train model '{previous_best_train_model_path}': {e}")
+                previous_best_train_model_path = new_best_model_path
+            else: 
+                epochs_without_improvement_train += 1
+                print(f"  No improvement in train loss MA for {epochs_without_improvement_train} epoch(s). Best MA: {best_train_loss_ma:.6f}, Current MA: {current_train_moving_avg:.6f}")
+                if epochs_without_improvement_train >= EARLY_STOPPING_PATIENCE:
+                    # ... (percentage improvement check)
+                    idx_before_streak_started = len(all_train_losses_for_plot) - epochs_without_improvement_train -1 # Index of the epoch before non-improvement streak
+                    # Ensure indices are valid
+                    if idx_before_streak_started >= 0:
+                        # Calculate MA from historical_losses_for_ma of length TRAIN_MOVING_AVG_WINDOW ending at idx_before_streak_started
+                        historical_window_start = max(0, idx_before_streak_started - TRAIN_MOVING_AVG_WINDOW + 1)
+                        historical_losses_for_ma_calc = all_train_losses_for_plot[historical_window_start : idx_before_streak_started + 1]
+    
+                        if len(historical_losses_for_ma_calc) >= TRAIN_MOVING_AVG_WINDOW // 2 : # Need at least half window
+                            historical_train_ma = sum(historical_losses_for_ma_calc) / len(historical_losses_for_ma_calc)
+                            # Improvement is positive if current_train_moving_avg is smaller
+                            percentage_improvement_vs_historical = (historical_train_ma - current_train_moving_avg) / abs(historical_train_ma + 1e-9) * 100
+                            print(f"  Patience met. Current Train MA: {current_train_moving_avg:.6f}, Historical MA before streak ({len(historical_losses_for_ma_calc)} epochs): {historical_train_ma:.6f}. Improvement: {percentage_improvement_vs_historical:.2f}%")
+                            if percentage_improvement_vs_historical < EARLY_STOPPING_PERCENTAGE:
+                                should_stop_early = True
+                                print(f"Early stopping triggered: Improvement {percentage_improvement_vs_historical:.2f}% < threshold {EARLY_STOPPING_PERCENTAGE}%.")
+                        else:
+                            print(f"  Patience met, but not enough historical data ({len(historical_losses_for_ma_calc)} points out of {TRAIN_MOVING_AVG_WINDOW}) to reliably calculate percentage improvement for early stopping.")
+                    else:
+                         print(f"  Patience met, but not enough historical data (idx_before_streak_started = {idx_before_streak_started}) to compare.")
+    
+        
+        if (current_epoch_num_for_log % SAVE_MODEL_EVERY == 0) or (epoch == NUM_EPOCHS - 1):
+            is_best_this_epoch = current_train_moving_avg == best_train_loss_ma # Check if current MA is the best overall
+            # Avoid saving regular checkpoint if it's also the best_train_loss epoch to prevent duplicate saves
+            if not (is_best_this_epoch and os.path.join(config.CHECKPOINT_DIR, "denoiser_model_best_train_loss.pth") == previous_best_train_model_path):
+                 torch.save({
+                    'epoch': epoch, 'model_state_dict': denoiser.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(), 'loss': avg_train_loss,
+                    'val_loss': avg_val_loss, 'best_train_loss_ma': best_train_loss_ma, # Save current best_train_loss_ma
+                    'best_val_loss_ma': best_val_loss_ma # Also save best_val_loss_ma for regular epoch saves
+                }, os.path.join(config.CHECKPOINT_DIR, f"denoiser_model_epoch_{current_epoch_num_for_log:04d}.pth"))
+                 print(f"Saved model checkpoint at epoch {current_epoch_num_for_log}")
+        
+        final_epoch_completed = epoch # Update last completed epoch here
+        if should_stop_early: break
+    
+        if (current_epoch_num_for_log % SAMPLE_EVERY == 0) or (epoch == NUM_EPOCHS - 1) or should_stop_early:
+            print(f"Epoch {current_epoch_num_for_log}: Generating multiple visualization samples...")
+            denoiser.eval()
+            vis_wandb_log_data = {} # Accumulate images here for a single wandb.log call
+    
+            # --- 1. Fixed Sample ---
+            fixed_sample_idx = wandb_config.get('FIXED_VIS_SAMPLE_IDX', 0)
+            if fixed_sample_idx < len(val_dataset):
+                print(f"  Generating fixed sample (index {fixed_sample_idx} from val_dataset)...")
+                fixed_sample_data = val_dataset[fixed_sample_idx]
+                prev_obs_fixed, prev_act_fixed, gt_fixed_batch, gt_prev_frames_fixed_seq = prepare_single_sample_for_sampler(fixed_sample_data, DEVICE) # gt_fixed_batch is [1,C,H,W]
+                with torch.no_grad():
+                    generated_output_tuple_fixed = diffusion_sampler.sample(prev_obs=prev_obs_fixed, prev_act=prev_act_fixed)
+                
+                if generated_output_tuple_fixed:
+                    generated_image_batch_fixed = generated_output_tuple_fixed[0] # This is [1, C, H, W]
+                    if generated_image_batch_fixed.ndim == 4 and generated_image_batch_fixed.shape[0] == 1:
+                        generated_image_to_save_fixed = generated_image_batch_fixed[0] # Extract single image: [C, H, W]
+                    else:
+                        generated_image_to_save_fixed = generated_image_batch_fixed # Fallback, though should be 4D
+        
+                    gt_image_to_save_fixed = gt_fixed_batch[0] # Extract single GT image: [C, H, W]
+        
+                    vis_path_fixed = save_visualization_samples(
+                        generated_image_to_save_fixed, # Should be [C,H,W]
+                        gt_image_to_save_fixed,        # Should be [C,H,W]
+                        gt_prev_frames_fixed_seq,
+                        current_epoch_num_for_log,
+                        config.SAMPLE_DIR,
+                        prefix=f"val_vis_fixed_idx{fixed_sample_idx}"
+                    )
+                    if vis_path_fixed and wandb.run:
+                        vis_wandb_log_data[f"validation_samples/fixed_idx_{fixed_sample_idx}"] = wandb.Image(vis_path_fixed, caption=f"Epoch {current_epoch_num_for_log} Fixed Sample (Val Idx {fixed_sample_idx})")
+                else:
+                    print("  Warning: Sampler did not return output for fixed sample.")
+            else:
+                print(f"  Warning: FIXED_SAMPLE_IDX {fixed_sample_idx} is out of bounds for val_dataset (size {len(val_dataset)}). Skipping fixed sample.")
+        
+            # --- 2. Random Stopped Sample (Action 0.0) ---
+            if len(val_stopped_subset) > 0:
+                print("  Generating random stopped sample...")
+                random_stopped_idx_in_subset = random.randint(0, len(val_stopped_subset) - 1)
+                stopped_sample_data = val_stopped_subset[random_stopped_idx_in_subset]
+                prev_obs_stopped, prev_act_stopped, gt_stopped_batch, gt_prev_frames_stopped_seq = prepare_single_sample_for_sampler(stopped_sample_data, DEVICE) # gt_stopped_batch is [1,C,H,W]
+                with torch.no_grad():
+                    generated_output_tuple_stopped = diffusion_sampler.sample(prev_obs=prev_obs_stopped, prev_act=prev_act_stopped)
+                
+                if generated_output_tuple_stopped:
+                    generated_image_batch_stopped = generated_output_tuple_stopped[0] # This is [1, C, H, W]
+                    if generated_image_batch_stopped.ndim == 4 and generated_image_batch_stopped.shape[0] == 1:
+                        generated_image_to_save_stopped = generated_image_batch_stopped[0] # Extract single image: [C, H, W]
+                    else:
+                        generated_image_to_save_stopped = generated_image_batch_stopped
+        
+                    gt_image_to_save_stopped = gt_stopped_batch[0] # Extract single GT image: [C, H, W]
+        
+                    vis_path_stopped = save_visualization_samples(
+                        generated_image_to_save_stopped, # Should be [C,H,W]
+                        gt_image_to_save_stopped,        # Should be [C,H,W]
+                        gt_prev_frames_stopped_seq,
+                        current_epoch_num_for_log,
+                        config.SAMPLE_DIR,
+                        prefix="val_vis_stopped_random"
+                    )
+                    if vis_path_stopped and wandb.run:
+                        vis_wandb_log_data["validation_samples/random_stopped"] = wandb.Image(vis_path_stopped, caption=f"Epoch {current_epoch_num_for_log} Random Stopped Sample")
+                else:
+                    print("  Warning: Sampler did not return output for stopped sample.")
+            else:
+                print("  Warning: No stopped (action 0.0) samples found in validation set. Skipping random stopped sample.")
+        
+            # --- 3. Random Moving Sample ---
+            moving_action_val_vis = wandb_config.get('MOVING_ACTION_VALUE_FOR_VIS', 0.1)
+            if len(val_moving_subset) > 0:
+                print(f"  Generating random moving sample (action {moving_action_val_vis})...")
+                random_moving_idx_in_subset = random.randint(0, len(val_moving_subset) - 1)
+                moving_sample_data = val_moving_subset[random_moving_idx_in_subset]
+                prev_obs_moving, prev_act_moving, gt_moving_batch, gt_prev_frames_moving_seq = prepare_single_sample_for_sampler(moving_sample_data, DEVICE) # gt_moving_batch is [1,C,H,W]
+                with torch.no_grad():
+                    generated_output_tuple_moving = diffusion_sampler.sample(prev_obs=prev_obs_moving, prev_act=prev_act_moving)
+        
+                if generated_output_tuple_moving:
+                    generated_image_batch_moving = generated_output_tuple_moving[0] # This is [1, C, H, W]
+                    if generated_image_batch_moving.ndim == 4 and generated_image_batch_moving.shape[0] == 1:
+                        generated_image_to_save_moving = generated_image_batch_moving[0] # Extract single image: [C, H, W]
+                    else:
+                        generated_image_to_save_moving = generated_image_batch_moving
+        
+                    gt_image_to_save_moving = gt_moving_batch[0] # Extract single GT image: [C, H, W]
+        
+                    vis_path_moving = save_visualization_samples(
+                        generated_image_to_save_moving, # Should be [C,H,W]
+                        gt_image_to_save_moving,        # Should be [C,H,W]
+                        gt_prev_frames_moving_seq,
+                        current_epoch_num_for_log,
+                        config.SAMPLE_DIR,
+                        prefix=f"val_vis_moving_act{str(moving_action_val_vis).replace('.', 'p')}_random"
+                    )
+                    if vis_path_moving and wandb.run:
+                        vis_wandb_log_data[f"validation_samples/random_moving_act{str(moving_action_val_vis).replace('.', 'p')}"] = wandb.Image(vis_path_moving, caption=f"Epoch {current_epoch_num_for_log} Random Moving Sample (Action {moving_action_val_vis})")
+                else:
+                    print("  Warning: Sampler did not return output for moving sample.")
+            else:
+                print(f"  Warning: No moving (action {moving_action_val_vis}) samples found in validation set. Skipping random moving sample.")
+            
+            denoiser.train() # Set model back to training mode
+            # Log all accumulated data for this epoch (losses + images)
+            if wandb.run:
+                wandb.log({**wandb_log_data, **vis_wandb_log_data})
+        elif wandb.run: # If not sampling, still log epoch metrics
+             wandb.log(wandb_log_data)
+    
+    
+        if (current_epoch_num_for_log % PLOT_EVERY == 0) or (epoch == NUM_EPOCHS - 1) or should_stop_early :
+            plt.figure(figsize=(12, 6))
+            plt.plot(all_train_losses_for_plot, label="Avg Train Loss")
+            plt.plot(all_val_losses_for_plot, label="Avg Validation Loss")
+            if len(all_train_losses_for_plot) >= TRAIN_MOVING_AVG_WINDOW:
+                train_ma_plot = [sum(all_train_losses_for_plot[i-TRAIN_MOVING_AVG_WINDOW+1:i+1])/TRAIN_MOVING_AVG_WINDOW for i in range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot))]
+                plt.plot(range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot)), train_ma_plot, label=f'Train Loss MA ({TRAIN_MOVING_AVG_WINDOW} epochs)', linestyle=':')
+            if len(all_val_losses_for_plot) >= VAL_MOVING_AVG_WINDOW:
+                val_ma_plot = [sum(all_val_losses_for_plot[i-VAL_MOVING_AVG_WINDOW+1:i+1])/VAL_MOVING_AVG_WINDOW for i in range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot))]
+                plt.plot(range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot)), val_ma_plot, label=f'Val Loss MA ({VAL_MOVING_AVG_WINDOW} epochs)', linestyle='--')
+            plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title(f"Progress (Epoch {current_epoch_num_for_log})")
+            plt.legend(); plt.grid(True)
+            plt.savefig(os.path.join(config.PLOT_DIR, f"loss_plot_epoch_{current_epoch_num_for_log:04d}.png"))
+            ### WANDB: Log epoch loss plot ###
+            wandb.log({"epoch_loss_plot": wandb.Image(plt, caption=f"Loss Plot Epoch {current_epoch_num_for_log}")})
+            plt.close()
+            print(f"Saved loss plot up to epoch {current_epoch_num_for_log}")
+    
+    overall_training_end_time = time.time()
+    total_training_duration_seconds = overall_training_end_time - overall_training_start_time
+    total_training_duration_formatted = str(datetime.timedelta(seconds=total_training_duration_seconds))
+    
+    # final_epoch_completed is the last epoch index that ran (0-indexed)
+    print(f"--- Training Complete (Stopped after epoch {final_epoch_completed + 1}) ---") 
+    print(f"Total training duration: {total_training_duration_formatted}") 
+    
+    # Final Plot
+    plt.figure(figsize=(12, 6))
+    plt.plot(all_train_losses_for_plot, label="Avg Train Loss")
+    plt.plot(all_val_losses_for_plot, label="Avg Validation Loss")
+    if len(all_train_losses_for_plot) >= TRAIN_MOVING_AVG_WINDOW:
+        train_ma_plot = [sum(all_train_losses_for_plot[i-TRAIN_MOVING_AVG_WINDOW+1:i+1])/TRAIN_MOVING_AVG_WINDOW for i in range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot))]
+        plt.plot(range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot)), train_ma_plot, label=f'Train Loss MA ({TRAIN_MOVING_AVG_WINDOW} epochs)', linestyle=':')
+    if len(all_val_losses_for_plot) >= VAL_MOVING_AVG_WINDOW:
+        val_ma_plot = [sum(all_val_losses_for_plot[i-VAL_MOVING_AVG_WINDOW+1:i+1])/VAL_MOVING_AVG_WINDOW for i in range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot))]
+        plt.plot(range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot)), val_ma_plot, label=f'Val Loss MA ({VAL_MOVING_AVG_WINDOW} epochs)', linestyle='--')
+    plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title(f"Denoiser Final Training & Validation Loss (Up to Epoch {final_epoch_completed + 1})")
+    plt.legend(); plt.grid(True)
+    final_loss_plot_path = os.path.join(config.PLOT_DIR, "denoiser_final_loss_plot.png")
+    plt.savefig(final_loss_plot_path)
+    # plt.show() # Usually not needed in script, but can be uncommented for interactive
+    print(f"Final loss plot saved to {final_loss_plot_path}")
+    
+    ### WANDB: Log final loss plot and finish run ###
+    wandb.log({"final_loss_plot": wandb.Image(final_loss_plot_path, caption=f"Final Loss Plot up to Epoch {final_epoch_completed + 1}")})
+    wandb.finish()
+    print("Wandb run finished.")
+    
+    
+    # In[ ]:
+    
+    
+    
+    
 
-
-    if (current_epoch_num_for_log % PLOT_EVERY == 0) or (epoch == NUM_EPOCHS - 1) or should_stop_early :
-        plt.figure(figsize=(12, 6))
-        plt.plot(all_train_losses_for_plot, label="Avg Train Loss")
-        plt.plot(all_val_losses_for_plot, label="Avg Validation Loss")
-        if len(all_train_losses_for_plot) >= TRAIN_MOVING_AVG_WINDOW:
-            train_ma_plot = [sum(all_train_losses_for_plot[i-TRAIN_MOVING_AVG_WINDOW+1:i+1])/TRAIN_MOVING_AVG_WINDOW for i in range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot))]
-            plt.plot(range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot)), train_ma_plot, label=f'Train Loss MA ({TRAIN_MOVING_AVG_WINDOW} epochs)', linestyle=':')
-        if len(all_val_losses_for_plot) >= VAL_MOVING_AVG_WINDOW:
-            val_ma_plot = [sum(all_val_losses_for_plot[i-VAL_MOVING_AVG_WINDOW+1:i+1])/VAL_MOVING_AVG_WINDOW for i in range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot))]
-            plt.plot(range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot)), val_ma_plot, label=f'Val Loss MA ({VAL_MOVING_AVG_WINDOW} epochs)', linestyle='--')
-        plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title(f"Progress (Epoch {current_epoch_num_for_log})")
-        plt.legend(); plt.grid(True)
-        plt.savefig(os.path.join(config.PLOT_DIR, f"loss_plot_epoch_{current_epoch_num_for_log:04d}.png"))
-        ### WANDB: Log epoch loss plot ###
-        wandb.log({"epoch_loss_plot": wandb.Image(plt, caption=f"Loss Plot Epoch {current_epoch_num_for_log}")})
-        plt.close()
-        print(f"Saved loss plot up to epoch {current_epoch_num_for_log}")
-
-overall_training_end_time = time.time()
-total_training_duration_seconds = overall_training_end_time - overall_training_start_time
-total_training_duration_formatted = str(datetime.timedelta(seconds=total_training_duration_seconds))
-
-# final_epoch_completed is the last epoch index that ran (0-indexed)
-print(f"--- Training Complete (Stopped after epoch {final_epoch_completed + 1}) ---") 
-print(f"Total training duration: {total_training_duration_formatted}") 
-
-# Final Plot
-plt.figure(figsize=(12, 6))
-plt.plot(all_train_losses_for_plot, label="Avg Train Loss")
-plt.plot(all_val_losses_for_plot, label="Avg Validation Loss")
-if len(all_train_losses_for_plot) >= TRAIN_MOVING_AVG_WINDOW:
-    train_ma_plot = [sum(all_train_losses_for_plot[i-TRAIN_MOVING_AVG_WINDOW+1:i+1])/TRAIN_MOVING_AVG_WINDOW for i in range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot))]
-    plt.plot(range(TRAIN_MOVING_AVG_WINDOW-1, len(all_train_losses_for_plot)), train_ma_plot, label=f'Train Loss MA ({TRAIN_MOVING_AVG_WINDOW} epochs)', linestyle=':')
-if len(all_val_losses_for_plot) >= VAL_MOVING_AVG_WINDOW:
-    val_ma_plot = [sum(all_val_losses_for_plot[i-VAL_MOVING_AVG_WINDOW+1:i+1])/VAL_MOVING_AVG_WINDOW for i in range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot))]
-    plt.plot(range(VAL_MOVING_AVG_WINDOW-1, len(all_val_losses_for_plot)), val_ma_plot, label=f'Val Loss MA ({VAL_MOVING_AVG_WINDOW} epochs)', linestyle='--')
-plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title(f"Denoiser Final Training & Validation Loss (Up to Epoch {final_epoch_completed + 1})")
-plt.legend(); plt.grid(True)
-final_loss_plot_path = os.path.join(config.PLOT_DIR, "denoiser_final_loss_plot.png")
-plt.savefig(final_loss_plot_path)
-# plt.show() # Usually not needed in script, but can be uncommented for interactive
-print(f"Final loss plot saved to {final_loss_plot_path}")
-
-### WANDB: Log final loss plot and finish run ###
-wandb.log({"final_loss_plot": wandb.Image(final_loss_plot_path, caption=f"Final Loss Plot up to Epoch {final_epoch_completed + 1}")})
-wandb.finish()
-print("Wandb run finished.")
-
-
-# In[ ]:
-
-
-
-
+if __name__ == '__main__':
+    _main_training()
