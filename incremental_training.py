@@ -4,9 +4,10 @@
 import os
 from importnb import Notebook
 import torch
-from torch.utils.data import DataLoader, Dataset, IterableDataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
 import random
 import pickle
+import numpy as np
 
 import config
 with Notebook():
@@ -16,6 +17,9 @@ with Notebook():
 from diamond_world_model_trainer import train_diamond_model
 
 import models
+
+MAX_HOLDOUT = 800
+EVAL_SEED = 42
 
 class ReplayBuffer(Dataset):
     """A simple replay buffer storing dataset indices."""
@@ -157,6 +161,10 @@ def main():
             config.NUM_PREV_FRAMES,
             transform=config.TRANSFORM,
         )
+        if MAX_HOLDOUT and MAX_HOLDOUT < len(dataset_holdout):
+            rng = np.random.RandomState(EVAL_SEED)
+            subset_idx = rng.choice(len(dataset_holdout), size=MAX_HOLDOUT, replace=False)
+            dataset_holdout = Subset(dataset_holdout, subset_idx.tolist())
         dl_holdout = DataLoader(dataset_holdout, batch_size=1, shuffle=False)
         results = evaluate_models_alternating(
             sampler_a, sampler_b, dl_holdout, config.DEVICE, config.NUM_PREV_FRAMES
