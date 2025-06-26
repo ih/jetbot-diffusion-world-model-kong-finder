@@ -579,12 +579,12 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
 
 
-def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_epochs=None):
+def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_steps=None):
     """Train a denoiser model with the provided dataloaders.
 
-    Returns the path to the best checkpoint saved during training."""
+    ``max_steps`` bounds training time regardless of dataset size."""
     device = config.DEVICE
-    epochs = max_epochs or config.NUM_EPOCHS
+    num_steps = max_steps or config.NUM_TRAIN_STEPS
 
     inner_cfg = models.InnerModelConfig(
         img_channels=config.DM_IMG_CHANNELS,
@@ -633,31 +633,44 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_epo
     best_val = float("inf")
     best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
     patience = config.EARLY_STOPPING_PATIENCE
-    min_epochs = config.MIN_EPOCHS
+    min_steps = config.MIN_EPOCHS
     wait = 0
 
-    num_train_batches = len(train_loader)
-    num_val_batches = len(val_loader)
+    train_iter = iter(train_loader)
 
-    for epoch in range(epochs):
-        ep = epoch + 1
-        train_denoiser_epoch(
-            denoiser, train_loader, opt, scheduler, config.GRAD_CLIP_VALUE,
-            device, ep, num_train_batches, num_val_batches
-        )
-        val_loss = validate_denoiser_epoch(
-            denoiser, val_loader, device, ep, num_train_batches, num_val_batches
-        )
+    for step in range(num_steps):
+        try:
+            batch = next(train_iter)
+        except StopIteration:
+            train_iter = iter(train_loader)
+            batch = next(train_iter)
 
-        if val_loss < best_val:
-            best_val = val_loss
-            torch.save({"model_state_dict": denoiser.state_dict()}, best_path)
-            wait = 0
-        else:
-            wait += 1
+        denoiser.train()
+        loss, _ = denoiser(batch)
+        loss = loss / config.ACCUMULATION_STEPS
+        loss.backward()
 
-        if ep >= min_epochs and wait >= patience:
-            break
+        if (step + 1) % config.ACCUMULATION_STEPS == 0:
+            if config.GRAD_CLIP_VALUE > 0:
+                torch.nn.utils.clip_grad_norm_(denoiser.parameters(), config.GRAD_CLIP_VALUE)
+            opt.step()
+            scheduler.step()
+            opt.zero_grad()
+
+        if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
+            val_loss = validate_denoiser_epoch(
+                denoiser, val_loader, device, step + 1, 0, 0
+            )
+
+            if val_loss < best_val:
+                best_val = val_loss
+                torch.save({"model_state_dict": denoiser.state_dict()}, best_path)
+                wait = 0
+            else:
+                wait += 1
+
+            if (step + 1) >= min_steps and wait >= patience:
+                break
 
     return best_path
 

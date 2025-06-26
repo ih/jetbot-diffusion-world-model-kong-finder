@@ -43,7 +43,8 @@ class ReplayBuffer(Dataset):
         idxs = random.sample(self.indices, min(k, len(self.indices)))
         return [self.dataset[i] for i in idxs]
 
-    def add_indices(self, new_idx):
+    def add_episode(self, new_idx):
+        """Add new indices from a recently processed session."""
         self.indices = list(new_idx) + self.indices
         self.indices = self.indices[: self.max_size]
         if self.index_path:
@@ -67,16 +68,21 @@ class MixedDataset(IterableDataset):
             else:
                 yield self.replay_buffer.sample(1)[0]
 
-def build_batch(sample):
-    img, act, prev = sample
-    b = 1
+def build_batch(samples):
+    """Collate function building a ``models.Batch`` from dataset samples."""
+    imgs, acts, prevs = zip(*samples)
+    imgs  = torch.stack(imgs, 0)
+    acts  = torch.stack(acts, 0)
+    prevs = torch.stack(prevs, 0)
+
+    b        = len(samples)
     num_prev = config.NUM_PREV_FRAMES
-    c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
-    prev_seq = prev.view(b, num_prev, c, h, w)
-    obs = torch.cat((prev_seq, img.unsqueeze(1)), dim=1)
-    act_seq = act.repeat(1, num_prev).long()
-    mask = torch.ones(b, num_prev + 1, dtype=torch.bool, device=img.device)
-    return models.Batch(obs=obs, act=act_seq, mask_padding=mask, info=[{}])
+    c, h, w  = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
+    prev_seq = prevs.view(b, num_prev, c, h, w)
+    obs      = torch.cat((prev_seq, imgs.unsqueeze(1)), dim=1)
+    act_seq  = acts.repeat(1, num_prev).long()
+    mask     = torch.ones(b, num_prev + 1, dtype=torch.bool, device=imgs.device)
+    return models.Batch(obs=obs, act=act_seq, mask_padding=mask, info=[{}] * b)
 
 
 def main():
@@ -106,7 +112,14 @@ def main():
     replay_ds = ReplayBuffer(full_ds, max_size=50000, index_path=config.REPLAY_INDEX_PATH)
 
     mixed_dataset = MixedDataset(fresh_ds, replay_ds, alpha=0.2)
-    train_loader = DataLoader(mixed_dataset, batch_size=config.BATCH_SIZE)
+    train_loader = DataLoader(
+        mixed_dataset,
+        batch_size=config.BATCH_SIZE,
+        collate_fn=build_batch,
+        num_workers=4,
+        pin_memory=True,
+        drop_last=True,
+    )
 
     val_dataset = JetbotDataset(
         config.HOLDOUT_CSV_PATH,
@@ -115,11 +128,23 @@ def main():
         config.NUM_PREV_FRAMES,
         transform=config.TRANSFORM,
     )
-    val_loader = DataLoader(val_dataset, batch_size=config.BATCH_SIZE, shuffle=False)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.BATCH_SIZE,
+        shuffle=False,
+        collate_fn=build_batch,
+        num_workers=4,
+        pin_memory=True,
+    )
 
     # Step 2: train a new model starting from the last best checkpoint
     ckpt_path = os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
-    new_ckpt = train_diamond_model(train_loader, val_loader, start_checkpoint=ckpt_path)
+    new_ckpt = train_diamond_model(
+        train_loader,
+        val_loader,
+        start_checkpoint=ckpt_path,
+        max_steps=config.NUM_TRAIN_STEPS,
+    )
 
     # Step 3: compare old best with the newly trained checkpoint
     if os.path.exists(ckpt_path):
@@ -149,7 +174,7 @@ def main():
     updated_ds = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
     new_indices = range(old_len, len(updated_ds))
     replay_ds.dataset = updated_ds
-    replay_ds.add_indices(new_indices)
+    replay_ds.add_episode(new_indices)
 
 if __name__ == '__main__':
     main()
