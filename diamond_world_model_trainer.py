@@ -637,6 +637,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     wait = 0
 
     train_iter = iter(train_loader)
+    start_time = time.time()
 
     for step in range(num_steps):
         try:
@@ -656,11 +657,15 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             opt.step()
             scheduler.step()
             opt.zero_grad()
+            if wandb.run:
+                wandb.log({"train_step_loss": loss.item() * config.ACCUMULATION_STEPS}, step=step + 1)
 
         if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
             val_loss = validate_denoiser_epoch(
                 denoiser, val_loader, device, step + 1, 0, 0
             )
+            if wandb.run:
+                wandb.log({"val_loss": val_loss}, step=step + 1)
 
             if val_loss < best_val:
                 best_val = val_loss
@@ -672,6 +677,10 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             if (step + 1) >= min_steps and wait >= patience:
                 break
 
+    duration = time.time() - start_time
+    if wandb.run:
+        wandb.log({"train_duration_sec": duration, "final_step": step + 1})
+    print(f"Training finished in {duration:.2f}s after {step + 1} steps")
     return best_path
 
 
