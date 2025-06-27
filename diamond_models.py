@@ -324,6 +324,15 @@ class Batch:
     mask_padding: Optional[torch.Tensor] = None  # Shape: (B, T)
     info: Optional[Dict[str, Any]] = None
 
+    def to(self, device: torch.device) -> "Batch":
+        """Return a new Batch with tensors moved to the given device."""
+        return Batch(
+            obs=self.obs.to(device),
+            act=self.act.to(device),
+            mask_padding=self.mask_padding.to(device) if self.mask_padding is not None else None,
+            info=self.info,
+        )
+
 @dataclass
 class Conditioners:
     c_in: Tensor
