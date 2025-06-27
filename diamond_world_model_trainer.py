@@ -1,19 +1,21 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
-get_ipython().system('pip install wandb')
 
 
-# In[2]:
 
+# 
+# 
+# get_ipython().system('pip install wandb')
 
-get_ipython().system('pip install --upgrade typing_extensions')
+# 
+# 
+# get_ipython().system('pip install --upgrade typing_extensions')
 
-
-# In[1]:
+# In[ ]:
 
 
 import torch
@@ -49,7 +51,7 @@ from PIL import Image as PILImage
 print("Imports successful.")
 
 
-# In[2]:
+# In[ ]:
 
 
 print("--- Configuration ---")
@@ -58,7 +60,7 @@ torch.backends.cudnn.benchmark = True
 print(f"Using device: {DEVICE}")
 
 
-# In[3]:
+# In[ ]:
 
 
 # Denoiser & InnerModel specific
@@ -162,63 +164,41 @@ wandb.init(project=wandb_config['PROJECT_NAME'], config=wandb_config)
 print("Wandb initialized.")
 
 
-# In[4]:
+# In[ ]:
 
 
-data_transform = config.TRANSFORM
+def split_dataset():
+    full_dataset = JetbotDataset(
+        csv_path=config.CSV_PATH,
+        data_dir=config.DATA_DIR,
+        image_size=config.IMAGE_SIZE,
+        num_prev_frames=config.NUM_PREV_FRAMES,
+        transform=config.TRANSFORM
+    )
+    print(f"Full dataset size: {len(full_dataset)}")
+    split_file_path = os.path.join(config.OUTPUT_DIR, getattr(config, 'SPLIT_DATASET_FILENAME', 'dataset_split.pth'))
+    if os.path.exists(split_file_path):
+        print(f"Loading dataset split from {split_file_path}")
+        split_data = torch.load(split_file_path)
+        train_indices, val_indices = split_data['train_indices'], split_data['val_indices']
+        train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
+        val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
+    else:
+        print("Creating new train/val split...")
+        total_size = len(full_dataset)
+        train_size = int(total_size * 0.9)
+        val_size = total_size - train_size
+        train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size]) # Using torch.random_split by default
+        torch.save({
+            'train_indices': train_dataset.indices,
+            'val_indices': val_dataset.indices,
+        }, split_file_path)
+        print(f"Saved new dataset split to {split_file_path}")
 
-full_dataset = JetbotDataset(
-    csv_path=config.CSV_PATH,
-    data_dir=config.DATA_DIR,
-    image_size=config.IMAGE_SIZE,
-    num_prev_frames=config.NUM_PREV_FRAMES,
-    transform=data_transform
-)
-print(f"Full dataset size: {len(full_dataset)}")
-
-split_file_path = os.path.join(config.OUTPUT_DIR, getattr(config, 'SPLIT_DATASET_FILENAME', 'dataset_split.pth'))
-if os.path.exists(split_file_path):
-    print(f"Loading dataset split from {split_file_path}")
-    split_data = torch.load(split_file_path)
-    train_indices, val_indices = split_data['train_indices'], split_data['val_indices']
-    train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
-    val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
-else:
-    print("Creating new train/val split...")
-    total_size = len(full_dataset)
-    train_size = int(total_size * 0.9)
-    val_size = total_size - train_size
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size]) # Using torch.random_split by default
-    torch.save({
-        'train_indices': train_dataset.indices,
-        'val_indices': val_dataset.indices,
-    }, split_file_path)
-    print(f"Saved new dataset split to {split_file_path}")
-
-train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
-val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=8, pin_memory=True, drop_last=False)
-
-print(f"Training dataset size: {len(train_dataset)}")
-print(f"Validation dataset size: {len(val_dataset)}")
-print(f"Train Dataloader: {len(train_dataloader)} batches of size {BATCH_SIZE}")
-print(f"Validation Dataloader: {len(val_dataloader)} batches of size {BATCH_SIZE}")
-
-# Prepare filtered validation subsets for visualization ###
-if len(val_dataset) > 0:
-    print("Preparing filtered validation subsets for visualization...")
-    val_stopped_subset = filter_dataset_by_action(val_dataset, target_actions=0.0)
-    print(f"  Found {len(val_stopped_subset)} stopped samples in validation set.")
-    
-    moving_action_val = wandb_config['MOVING_ACTION_VALUE_FOR_VIS']
-    val_moving_subset = filter_dataset_by_action(val_dataset, target_actions=moving_action_val)
-    print(f"  Found {len(val_moving_subset)} moving samples (action {moving_action_val}) in validation set.")
-else:
-    print("Validation dataset is empty. Skipping creation of filtered subsets.")
-    val_stopped_subset = Subset(val_dataset, [])
-    val_moving_subset = Subset(val_dataset, [])
+    return train_dataset, val_dataset
 
 
-# In[5]:
+# In[ ]:
 
 
 print("--- Initializing Models ---")
@@ -296,7 +276,7 @@ except Exception as e:
     raise
 
 
-# In[6]:
+# In[ ]:
 
 
 print("--- Setting up Optimizer and Scheduler ---")
@@ -327,7 +307,7 @@ wandb.watch(denoiser, log="all", log_freq=100) # Adjust log_freq as needed
 print("Wandb is watching the denoiser model for gradients and parameters.")
 
 
-# In[7]:
+# In[ ]:
 
 
 START_EPOCH = 0
@@ -381,7 +361,7 @@ else:
         BEST_VAL_LOSS_MA_FROM_CKPT = float('inf')
 
 
-# In[8]:
+# In[ ]:
 
 
 def tensor_to_pil(tensor_img):
@@ -488,7 +468,7 @@ def prepare_single_sample_for_sampler(sample_data, device):
 print("Visualization helpers defined.")
 
 
-# In[9]:
+# In[ ]:
 
 
 def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total):
@@ -632,12 +612,8 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
 
     best_val = float("inf")
     best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
-    patience = config.EARLY_STOPPING_PATIENCE
-    min_steps = config.MIN_EPOCHS
-    wait = 0
 
     train_iter = iter(train_loader)
-    start_time = time.time()
 
     for step in range(num_steps):
         try:
@@ -657,37 +633,50 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             opt.step()
             scheduler.step()
             opt.zero_grad()
-            if wandb.run:
-                wandb.log({"train_step_loss": loss.item() * config.ACCUMULATION_STEPS}, step=step + 1)
 
         if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
             val_loss = validate_denoiser_epoch(
                 denoiser, val_loader, device, step + 1, 0, 0
             )
-            if wandb.run:
-                wandb.log({"val_loss": val_loss}, step=step + 1)
 
             if val_loss < best_val:
                 best_val = val_loss
                 torch.save({"model_state_dict": denoiser.state_dict()}, best_path)
-                wait = 0
-            else:
-                wait += 1
 
-            if (step + 1) >= min_steps and wait >= patience:
-                break
 
-    duration = time.time() - start_time
-    if wandb.run:
-        wandb.log({"train_duration_sec": duration, "final_step": step + 1})
-    print(f"Training finished in {duration:.2f}s after {step + 1} steps")
     return best_path
 
 
-# In[10]:
+# In[ ]:
 
 
 def _main_training():
+
+    train_dataset, val_dataset = split_dataset()
+    
+    
+    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=8, pin_memory=True, drop_last=False)
+    
+    print(f"Training dataset size: {len(train_dataset)}")
+    print(f"Validation dataset size: {len(val_dataset)}")
+    print(f"Train Dataloader: {len(train_dataloader)} batches of size {BATCH_SIZE}")
+    print(f"Validation Dataloader: {len(val_dataloader)} batches of size {BATCH_SIZE}")
+    
+    # Prepare filtered validation subsets for visualization ###
+    if len(val_dataset) > 0:
+        print("Preparing filtered validation subsets for visualization...")
+        val_stopped_subset = filter_dataset_by_action(val_dataset, target_actions=0.0)
+        print(f"  Found {len(val_stopped_subset)} stopped samples in validation set.")
+        
+        moving_action_val = wandb_config['MOVING_ACTION_VALUE_FOR_VIS']
+        val_moving_subset = filter_dataset_by_action(val_dataset, target_actions=moving_action_val)
+        print(f"  Found {len(val_moving_subset)} moving samples (action {moving_action_val}) in validation set.")
+    else:
+        print("Validation dataset is empty. Skipping creation of filtered subsets.")
+        val_stopped_subset = Subset(val_dataset, [])
+        val_moving_subset = Subset(val_dataset, [])
+    
     print("--- Starting Training Process ---")
     overall_training_start_time = time.time() 
     
@@ -1007,13 +996,11 @@ def _main_training():
     wandb.log({"final_loss_plot": wandb.Image(final_loss_plot_path, caption=f"Final Loss Plot up to Epoch {final_epoch_completed + 1}")})
     wandb.finish()
     print("Wandb run finished.")
-    
-    
-    # In[ ]:
-    
-    
-    
-    
+
+
+# In[ ]:
+
 
 if __name__ == '__main__':
     _main_training()
+

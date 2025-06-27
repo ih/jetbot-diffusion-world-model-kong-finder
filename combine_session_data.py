@@ -132,6 +132,9 @@ def combine_sessions_append(session_base_dir, aggregate_image_dir, aggregate_csv
          print(f"\nError writing aggregated CSV file to {aggregate_csv_path}. Error: {e}") #
 
 
+# In[3]:
+
+
 def gather_new_sessions_only(session_base_dir, processed_csv_path, new_image_dir, new_csv_path):
     """Collects only sessions not already present in processed_csv_path and
     writes them to a separate aggregate located at ``new_image_dir`` and ``new_csv_path``.
@@ -204,17 +207,18 @@ def gather_new_sessions_only(session_base_dir, processed_csv_path, new_image_dir
 # In[3]:
 
 
-combine_sessions_append(
-    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_session_data_two_actions_holdout_laundry', 
-    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\images',
-    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\holdout.csv'
-)
+
+# combine_sessions_append(
+#     r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_session_data_two_actions_holdout_laundry', 
+#     r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\images',
+#     r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\holdout.csv'
+# )
+
+# In[4]:
 
 
-# In[3]:
-
-
-combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
+if __name__ == '__main__':
+    combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
 
 
 # In[ ]:

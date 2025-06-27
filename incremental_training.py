@@ -1,6 +1,15 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+# In[ ]:
+
+
+
+
+
+# In[2]:
+
+
 import os
 from importnb import Notebook
 import torch
@@ -9,6 +18,10 @@ import random
 import pickle
 import numpy as np
 
+
+# In[3]:
+
+
 import config
 with Notebook():
     from jetbot_dataset import JetbotDataset
@@ -16,10 +29,22 @@ with Notebook():
     from compare_diamond_models import load_sampler, evaluate_models_alternating
 from diamond_world_model_trainer import train_diamond_model
 
+
+# In[3]:
+
+
 import models
 
-MAX_HOLDOUT = 800
+
+# In[4]:
+
+
+MAX_HOLDOUT = 10
 EVAL_SEED = 42
+
+
+# In[5]:
+
 
 class ReplayBuffer(Dataset):
     """A simple replay buffer storing dataset indices."""
@@ -55,6 +80,10 @@ class ReplayBuffer(Dataset):
             with open(self.index_path, "wb") as f:
                 pickle.dump(self.indices, f)
 
+
+# In[6]:
+
+
 class MixedDataset(IterableDataset):
     """Yields samples from fresh data with probability ``alpha`` and from the
     replay buffer otherwise."""
@@ -72,6 +101,10 @@ class MixedDataset(IterableDataset):
             else:
                 yield self.replay_buffer.sample(1)[0]
 
+
+# In[7]:
+
+
 def build_batch(samples):
     """Collate function building a ``models.Batch`` from dataset samples."""
     imgs, acts, prevs = zip(*samples)
@@ -87,6 +120,9 @@ def build_batch(samples):
     act_seq  = acts.repeat(1, num_prev).long()
     mask     = torch.ones(b, num_prev + 1, dtype=torch.bool, device=imgs.device)
     return models.Batch(obs=obs, act=act_seq, mask_padding=mask, info=[{}] * b)
+
+
+# In[8]:
 
 
 def main():
@@ -184,5 +220,16 @@ def main():
     replay_ds.dataset = updated_ds
     replay_ds.add_episode(new_indices)
 
+
+# In[ ]:
+
+
 if __name__ == '__main__':
     main()
+
+
+# In[ ]:
+
+
+
+

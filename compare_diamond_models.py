@@ -18,23 +18,6 @@ with Notebook():
 import wandb
 
 
-# In[2]:
-
-
-# Paths to the model checkpoints (update these as needed)
-MODEL_A_PATH = "C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\output_model_5hz_DIAMOND_laundry_30_sessions\checkpoints\denoiser_model_best_val_loss.pth"
-MODEL_B_PATH = 'model_b.pth'
-
-
-# In[3]:
-
-
-dataset = JetbotDataset(config.HOLDOUT_CSV_PATH, config.HOLDOUT_DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-print(f'Loaded holdout dataset with {len(dataset)} samples.')
-wandb.init(project="model_comparison")
-
-
 # In[4]:
 
 
@@ -150,14 +133,28 @@ def evaluate_models_alternating(sampler_a, sampler_b, dataloader, device, num_pr
 # In[ ]:
 
 
-device = config.DEVICE
-sampler_a = load_sampler(MODEL_A_PATH, device)
-sampler_b = load_sampler(MODEL_A_PATH, device)
-results = evaluate_models_alternating(sampler_a, sampler_b, dataloader, device, config.NUM_PREV_FRAMES)
-print('Model A Overall:', results.get('A'))
-print('Model B Overall:', results.get('B'))
-wandb.finish()
+if __name__ == '__main__':
+    # Paths to the model checkpoints (update these as needed)
+    MODEL_A_PATH = "C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\output_model_5hz_DIAMOND_laundry_30_sessions\checkpoints\denoiser_model_best_val_loss.pth"
+    MODEL_B_PATH = 'model_b.pth'
+    
+    
+    dataset = JetbotDataset(config.HOLDOUT_CSV_PATH, config.HOLDOUT_DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    print(f'Loaded holdout dataset with {len(dataset)} samples.')
+    wandb.init(project="model_comparison")
 
+    device = config.DEVICE
+    sampler_a = load_sampler(MODEL_A_PATH, device)
+    sampler_b = load_sampler(MODEL_A_PATH, device)
+    results = evaluate_models_alternating(sampler_a, sampler_b, dataloader, device, config.NUM_PREV_FRAMES)
+    print('Model A Overall:', results.get('A'))
+    print('Model B Overall:', results.get('B'))
+    wandb.finish()
+
+
+
+# 
 
 # In[ ]:
 

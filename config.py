@@ -55,7 +55,7 @@ SPLIT_DATASET_FILENAME = 'dataset_split.pth'
 EARLY_STOPPING_PATIENCE = 5
 EARLY_STOPPING_PERCENTAGE = .1
 MIN_EPOCHS = 5
-NUM_TRAIN_STEPS = 1000
+NUM_TRAIN_STEPS = 100
 
 # --- Data-rate control ----------------------------------------------------
 TARGET_HZ            = 5          # ← choose 5 or 10
