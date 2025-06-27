@@ -502,19 +502,31 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
 
     opt.zero_grad()
 
-    for batch_idx, (target_img_batch, action_batch, prev_frames_flat_batch) in enumerate(progress_bar):
-        current_batch_size = target_img_batch.shape[0]
-        target_img_batch = target_img_batch.to(device)
-        action_batch = action_batch.to(device)
-        prev_frames_flat_batch = prev_frames_flat_batch.to(device)
-
-        prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
-        batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
-        batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
-        batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
-        
-        # Corrected Batch instantiation
-        current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding, info=[{}] * current_batch_size)
+    for batch_idx, data in enumerate(progress_bar):
+        if isinstance(data, models.Batch):
+            current_batch_obj = models.Batch(
+                obs=data.obs.to(device),
+                act=data.act.to(device),
+                mask_padding=data.mask_padding.to(device) if data.mask_padding is not None else None,
+                info=data.info,
+            )
+            current_batch_size = current_batch_obj.obs.shape[0]
+        else:
+            target_img_batch, action_batch, prev_frames_flat_batch = data
+            current_batch_size = target_img_batch.shape[0]
+            target_img_batch = target_img_batch.to(device)
+            action_batch = action_batch.to(device)
+            prev_frames_flat_batch = prev_frames_flat_batch.to(device)
+            prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
+            batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
+            batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
+            batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
+            current_batch_obj = models.Batch(
+                obs=batch_obs_tensor,
+                act=batch_act_tensor,
+                mask_padding=batch_mask_padding,
+                info=[{}] * current_batch_size,
+            )
 
         loss, logs = denoiser_model(current_batch_obj)
         loss = loss / accumulation_steps
@@ -548,18 +560,31 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
     num_prev_frames = config.NUM_PREV_FRAMES
     c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
 
-    for batch_idx, (target_img_batch, action_batch, prev_frames_flat_batch) in enumerate(progress_bar):
-        current_batch_size = target_img_batch.shape[0]
-        target_img_batch = target_img_batch.to(device)
-        action_batch = action_batch.to(device)
-        prev_frames_flat_batch = prev_frames_flat_batch.to(device)
-        prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
-        batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
-        batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
-        batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
-        
-        # Corrected Batch instantiation
-        current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding, info=[{}]*current_batch_size)
+    for batch_idx, data in enumerate(progress_bar):
+        if isinstance(data, models.Batch):
+            current_batch_obj = models.Batch(
+                obs=data.obs.to(device),
+                act=data.act.to(device),
+                mask_padding=data.mask_padding.to(device) if data.mask_padding is not None else None,
+                info=data.info,
+            )
+            current_batch_size = current_batch_obj.obs.shape[0]
+        else:
+            target_img_batch, action_batch, prev_frames_flat_batch = data
+            current_batch_size = target_img_batch.shape[0]
+            target_img_batch = target_img_batch.to(device)
+            action_batch = action_batch.to(device)
+            prev_frames_flat_batch = prev_frames_flat_batch.to(device)
+            prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
+            batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
+            batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
+            batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
+            current_batch_obj = models.Batch(
+                obs=batch_obs_tensor,
+                act=batch_act_tensor,
+                mask_padding=batch_mask_padding,
+                info=[{}]*current_batch_size,
+            )
         
         loss, logs = denoiser_model(current_batch_obj)
         total_loss += loss.item()
