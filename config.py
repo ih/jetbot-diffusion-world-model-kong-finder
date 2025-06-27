@@ -40,7 +40,7 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 64
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND_laundry_30_sessions')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND_laundry_incremental')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
@@ -79,10 +79,15 @@ DM_IS_UPSAMPLER = False
 DM_UPSAMPLING_FACTOR = None # Or an integer like 2, 4 if DM_IS_UPSAMPLER is True
 
 # Sampler specific (for inference/visualization)
+SAMPLER_ORDER = 1
 SAMPLER_NUM_STEPS = 50
 SAMPLER_SIGMA_MIN = 0.002
 SAMPLER_SIGMA_MAX = 80.0
 SAMPLER_RHO = 7.0
+SAMPLER_S_CHURN = 0.0
+SAMPLER_S_TMIN = 0.0
+SAMPLER_S_TMAX = float("inf")
+SAMPLER_S_NOISE = 1.0
 
 # Training specific (GRAD_CLIP_VALUE might be new if not used before)
 GRAD_CLIP_VALUE = 10.0

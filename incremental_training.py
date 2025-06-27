@@ -7,7 +7,7 @@
 
 
 
-# In[2]:
+# In[1]:
 
 
 import os
@@ -19,7 +19,7 @@ import pickle
 import numpy as np
 
 
-# In[3]:
+# In[2]:
 
 
 import config
@@ -27,7 +27,7 @@ with Notebook():
     from jetbot_dataset import JetbotDataset
     from combine_session_data import combine_sessions_append, gather_new_sessions_only
     from compare_diamond_models import load_sampler, evaluate_models_alternating
-from diamond_world_model_trainer import train_diamond_model
+from diamond_world_model_trainer import train_diamond_model, split_dataset
 
 
 # In[3]:
@@ -47,20 +47,23 @@ EVAL_SEED = 42
 
 
 class ReplayBuffer(Dataset):
-    """A simple replay buffer storing dataset indices."""
+    """A simple replay buffer storing dataset indices in memory."""
 
-    def __init__(self, dataset, max_size=50000, index_path=None):
+    def __init__(self, dataset, max_size=50000):
         self.dataset = dataset
         self.max_size = max_size
-        self.index_path = index_path
-        if index_path and os.path.exists(index_path):
-            with open(index_path, "rb") as f:
-                self.indices = pickle.load(f)
+        # Initialize indices in memory. If dataset is large, take a random subset or the latest `max_size` items.
+        # For simplicity, taking the first `max_size` indices, assuming newer data is appended.
+        # If dataset can be shorter than max_size, list slicing handles it.
+        if len(dataset) > max_size:
+            # If you want to prioritize newest data (assuming it's at the end of `dataset` after updates):
+            # self.indices = list(range(len(dataset) - max_size, len(dataset)))
+            # Or, for random sampling from a large dataset initially:
+            # self.indices = random.sample(range(len(dataset)), max_size)
+            # Current: take the first max_size, new data added to front via add_episode
+            self.indices = list(range(max_size)) 
         else:
-            self.indices = list(range(len(dataset)))[:max_size]
-            if index_path:
-                with open(index_path, "wb") as f:
-                    pickle.dump(self.indices, f)
+            self.indices = list(range(len(dataset)))
 
     def __len__(self):
         return len(self.indices)
@@ -71,14 +74,6 @@ class ReplayBuffer(Dataset):
     def sample(self, k):
         idxs = random.sample(self.indices, min(k, len(self.indices)))
         return [self.dataset[i] for i in idxs]
-
-    def add_episode(self, new_idx):
-        """Add new indices from a recently processed session."""
-        self.indices = list(new_idx) + self.indices
-        self.indices = self.indices[: self.max_size]
-        if self.index_path:
-            with open(self.index_path, "wb") as f:
-                pickle.dump(self.indices, f)
 
 
 # In[6]:
@@ -142,49 +137,38 @@ def main():
         transform=config.TRANSFORM,
     ) if os.path.exists(config.NEW_CSV_PATH) else []
 
-    full_ds = JetbotDataset(
-        config.CSV_PATH,
-        config.DATA_DIR,
-        config.IMAGE_SIZE,
-        config.NUM_PREV_FRAMES,
-        transform=config.TRANSFORM,
-    )
-    replay_ds = ReplayBuffer(full_ds, max_size=50000, index_path=config.REPLAY_INDEX_PATH)
+    # Use split_dataset from diamond_world_model_trainer
+    train_ds, val_ds = split_dataset() # train_ds replaces full_ds, val_ds replaces val_dataset
+
+    replay_ds = ReplayBuffer(train_ds, max_size=50000) # Removed index_path
 
     mixed_dataset = MixedDataset(fresh_ds, replay_ds, alpha=0.2)
     train_loader = DataLoader(
         mixed_dataset,
         batch_size=config.BATCH_SIZE,
         collate_fn=build_batch,
-        num_workers=4,
         pin_memory=True,
         drop_last=True,
     )
 
-    val_dataset = JetbotDataset(
-        config.HOLDOUT_CSV_PATH,
-        config.HOLDOUT_DATA_DIR,
-        config.IMAGE_SIZE,
-        config.NUM_PREV_FRAMES,
-        transform=config.TRANSFORM,
-    )
     val_loader = DataLoader(
-        val_dataset,
+        val_ds, # Use val_ds from split_dataset
         batch_size=config.BATCH_SIZE,
         shuffle=False,
         collate_fn=build_batch,
-        num_workers=4,
         pin_memory=True,
     )
 
     # Step 2: train a new model starting from the last best checkpoint
     ckpt_path = os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
+    print("Starting training")
     new_ckpt = train_diamond_model(
         train_loader,
         val_loader,
         start_checkpoint=ckpt_path,
         max_steps=config.NUM_TRAIN_STEPS,
     )
+    print("Training Complete")
 
     # Step 3: compare old best with the newly trained checkpoint
     if os.path.exists(ckpt_path):
@@ -213,15 +197,38 @@ def main():
         os.replace(new_ckpt, ckpt_path)
 
     # After training, permanently add new sessions to the full dataset
-    old_len = len(full_ds)
+    # The ReplayBuffer's dataset (`train_ds`) is a Subset. To correctly update 
+    # the underlying full dataset and add new indices, we need to handle this carefully.
+    # For now, we'll assume that `combine_sessions_append` updates the source from which `split_dataset` reads.
+    # A more robust solution might involve updating the `full_dataset` object used by `split_dataset` 
+    # and then re-splitting, or carefully managing indices if `train_ds` is a subset of a global dataset.
+
+    # Assuming `split_dataset` will pick up new data on next run after `combine_sessions_append`
+    # The current `replay_ds.dataset` (which is `train_ds`) will not reflect these new sessions until the script is rerun
+    # and `split_dataset` is called again. This behavior is kept as is for now.
+    # To add *newly collected* data (from `fresh_ds`) to the replay buffer for the *current* training run, that's handled by `MixedDataset`.
+    # The logic below primarily concerns adding to the *persistent* dataset for future runs.
+
+    # Ensure all new data (including fresh_ds from this run) is combined into the main persistent dataset.
+    # This makes it available for the next execution of incremental_training.ipynb, 
+    # where split_dataset will create new train/val splits from the complete data.
+    print("Combining all session data into the main dataset for future runs...")
     combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
-    updated_ds = JetbotDataset(config.CSV_PATH, config.DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
-    new_indices = range(old_len, len(updated_ds))
-    replay_ds.dataset = updated_ds
-    replay_ds.add_episode(new_indices)
+    print("Session data combined.")
+
+    # No need to update the current run's replay_ds instance further, as it's ephemeral and will be rebuilt on the next run.
+
+    # Delete the dataset split file to ensure a fresh split on the next run
+    split_file_path = os.path.join(config.OUTPUT_DIR, getattr(config, 'SPLIT_DATASET_FILENAME', 'dataset_split.pth'))
+    if os.path.exists(split_file_path):
+        try:
+            os.remove(split_file_path)
+            print(f"Deleted dataset split file: {split_file_path}")
+        except OSError as e:
+            print(f"Error deleting dataset split file {split_file_path}: {e}")
 
 
-# In[ ]:
+# In[9]:
 
 
 if __name__ == '__main__':
