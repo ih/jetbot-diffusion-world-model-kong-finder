@@ -237,7 +237,7 @@ def main():
 
 
 if __name__ == '__main__':
-    wandb.init()
+    wandb.init(reinit=True)
     start_time = time.time()
     main()
     duration = time.time() - start_time

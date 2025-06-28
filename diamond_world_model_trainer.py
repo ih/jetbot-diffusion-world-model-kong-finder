@@ -255,7 +255,15 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
     return total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
 
 @torch.no_grad()
-def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total, start_step=0):
+def validate_denoiser_epoch(
+    denoiser_model,
+    val_dl,
+    device,
+    epoch_num_for_log,
+    num_train_batches_total,
+    num_val_batches_total,
+    step_offset: int = 0,
+):
     denoiser_model.eval()
     total_loss = 0.0
     progress_bar = tqdm(val_dl, desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
@@ -285,11 +293,19 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
         
         # Restored wandb logging
         if batch_idx % 10 == 0:
-            global_step = start_step + (epoch_num_for_log - 1) * (num_train_batches_total + num_val_batches_total) + num_train_batches_total + batch_idx
-            wandb.log({
-                "val_batch_loss": loss.item(),
-                "val_batch_denoising_loss": logs.get("loss_denoising"),
-             }, step=global_step)
+            global_step = step_offset + (
+                (epoch_num_for_log - 1)
+                * (num_train_batches_total + num_val_batches_total)
+                + num_train_batches_total
+                + batch_idx
+            )
+            wandb.log(
+                {
+                    "val_batch_loss": loss.item(),
+                    "val_batch_denoising_loss": logs.get("loss_denoising"),
+                },
+                step=global_step,
+            )
              
     return total_loss / len(val_dl) if len(val_dl) > 0 else 0.0
 
@@ -335,7 +351,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         state = torch.load(start_checkpoint, map_location=device)
         if 'model_state_dict' in state:
             denoiser.load_state_dict(state['model_state_dict'])
-            step_offset = state.get('step', -1) + 1
+        step_offset = state.get('step', -1) + 1
 
     opt = torch.optim.AdamW(
         denoiser.parameters(),
@@ -377,10 +393,10 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
 
     train_iter = iter(train_loader)
-    pbar = tqdm(range(num_steps), desc="Incremental Training Steps")
+    pbar = tqdm(range(step_offset, step_offset + num_steps), desc="Incremental Training Steps")
 
-    for step in pbar:
-        global_step = step_offset + step
+    for global_step in pbar:
+        step = global_step - step_offset
         try:
             batch = next(train_iter)
         except StopIteration:
@@ -438,7 +454,13 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
 
         if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
             current_val_loss = validate_denoiser_epoch(
-                denoiser, val_loader, device, step + 1, 0, 0, start_step=step_offset
+                denoiser,
+                val_loader,
+                device,
+                global_step + 1,
+                0,
+                0,
+                step_offset=step_offset,
             )
 
             if wandb.run:
