@@ -255,7 +255,7 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
     return total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
 
 @torch.no_grad()
-def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total):
+def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total, global_step_start=None):
     denoiser_model.eval()
     total_loss = 0.0
     progress_bar = tqdm(val_dl, desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
@@ -285,7 +285,10 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
         
         # Restored wandb logging
         if batch_idx % 10 == 0:
-            global_step = (epoch_num_for_log - 1) * (num_train_batches_total + num_val_batches_total) + num_train_batches_total + batch_idx
+            if global_step_start is None:
+                global_step = (epoch_num_for_log - 1) * (num_train_batches_total + num_val_batches_total) + num_train_batches_total + batch_idx
+            else:
+                global_step = global_step_start + batch_idx
             wandb.log({
                 "val_batch_loss": loss.item(),
                 "val_batch_denoising_loss": logs.get("loss_denoising"),
@@ -330,10 +333,12 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     )
     denoiser.setup_training(sigma_cfg)
 
+    start_step_offset = -1
     if start_checkpoint and os.path.exists(start_checkpoint):
         state = torch.load(start_checkpoint, map_location=device)
         if 'model_state_dict' in state:
             denoiser.load_state_dict(state['model_state_dict'])
+        start_step_offset = state.get('step', -1)
 
     opt = torch.optim.AdamW(
         denoiser.parameters(),
@@ -426,26 +431,27 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             opt.zero_grad()
 
         # Logging to wandb (more frequently for steps)
+        global_step = start_step_offset + step + 1
         if wandb.run and (step + 1) % 10 == 0: # Log every 10 steps
             wandb.log({
                 "incremental_step_train_loss": train_loss_val,
                 "incremental_step_denoising_loss": logs.get("loss_denoising"),
                 "incremental_step_learning_rate": scheduler.get_last_lr()[0]
-            }, step=step)
+            }, step=global_step)
 
         if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
             current_val_loss = validate_denoiser_epoch(
-                denoiser, val_loader, device, step + 1, 0, 0 # epoch_num_for_log set to step, might need adjustment if used for global step
+                denoiser, val_loader, device, step + 1, 0, 0, global_step_start=global_step
             )
 
             if wandb.run:
-                wandb.log({"incremental_eval_val_loss": current_val_loss}, step=step)
+                wandb.log({"incremental_eval_val_loss": current_val_loss}, step=global_step)
 
             if current_val_loss < best_val:
                 best_val = current_val_loss
-                torch.save({"model_state_dict": denoiser.state_dict(), 'step': step, 'val_loss': best_val}, best_path)
+                torch.save({"model_state_dict": denoiser.state_dict(), 'step': global_step, 'val_loss': best_val}, best_path)
                 if wandb.run:
-                    wandb.log({"incremental_best_val_loss": best_val}, step=step)
+                    wandb.log({"incremental_best_val_loss": best_val}, step=global_step)
 
             # Image Sampling (similar to _main_training, simplified for step-based)
             if wandb.run and (step + 1) % config.SAMPLE_EVERY == 0: # Check SAMPLE_EVERY from config
@@ -490,7 +496,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                         vis_wandb_log_data_inc["incremental_samples/random_stopped"] = wandb.Image(vis_path_stop, caption=f"Step {step+1} Random Stopped")
                 
                 if vis_wandb_log_data_inc:
-                    wandb.log(vis_wandb_log_data_inc, step=step)
+                    wandb.log(vis_wandb_log_data_inc, step=global_step)
                 denoiser.train() # Set back to train mode
         pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}", "Val Loss": f"{best_val:.4f}", "LR": f"{scheduler.get_last_lr()[0]:.2e}"})
 
