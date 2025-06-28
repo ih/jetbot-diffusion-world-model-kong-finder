@@ -424,7 +424,7 @@ class Denoiser(nn.Module):
             low_res = F.interpolate(batch.obs.reshape(b * t, c, h, w), scale_factor=self.cfg.upsampling_factor, mode="bicubic").reshape(b, t, c, H, W)
             assert all_obs.shape == low_res.shape
         else:
-            all_obs = batch.obs.clone()
+            all_obs = batch.obs.clone().to(self.device)
 
         loss = 0
         for i in range(seq_length):

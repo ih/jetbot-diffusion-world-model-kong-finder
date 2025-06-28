@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
 import random
 import pickle
 import numpy as np
+import wandb
 
 
 # In[2]:
@@ -190,8 +191,10 @@ def main():
             sampler_a, sampler_b, dl_holdout, config.DEVICE, config.NUM_PREV_FRAMES
         )
         if results['B']['avg_mse'] < results['A']['avg_mse']:
+            print("New model outperforms old model")
             os.replace(new_ckpt, ckpt_path)
         else:
+            print("Keeping old model")
             os.remove(new_ckpt)
     else:
         os.replace(new_ckpt, ckpt_path)
@@ -228,9 +231,10 @@ def main():
             print(f"Error deleting dataset split file {split_file_path}: {e}")
 
 
-# In[ ]:
+# In[9]:
 
 
+wandb.init()
 if __name__ == '__main__':
     main()
 

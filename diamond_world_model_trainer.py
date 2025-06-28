@@ -413,7 +413,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             )
 
         denoiser.train()
-        loss, logs = denoiser(batch) # Get logs as well
+        loss, logs = denoiser(current_batch_obj) # Get logs as well
         train_loss_val = loss.item() # Store for logging
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
