@@ -21,10 +21,9 @@ import wandb
 import time
 import datetime
 import logging
-
-# Setup logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('IncrementalTraining')
+logger = logging.getLogger("IncrementalTraining")
+
 
 # In[2]:
 
@@ -200,30 +199,24 @@ def main():
         )
         promoted = False
         incumbent_stats = {
-            "mse": results['A']['avg_mse'],
-            "ssim": results['A']['avg_ssim'],
+            'mse': results['A']['avg_mse'],
+            'ssim': results['A']['avg_ssim'],
         }
         candidate_stats = {
-            "mse": results['B']['avg_mse'],
-            "ssim": results['B']['avg_ssim'],
+            'mse': results['B']['avg_mse'],
+            'ssim': results['B']['avg_ssim'],
         }
-        mse_better = candidate_stats["mse"] < incumbent_stats["mse"] * EPS_MSE
-        ssim_better = candidate_stats["ssim"] > incumbent_stats["ssim"] + EPS_SSIM
+        mse_better = candidate_stats['mse'] < incumbent_stats['mse'] * EPS_MSE
+        ssim_better = candidate_stats['ssim'] > incumbent_stats['ssim'] + EPS_SSIM
 
         if mse_better and ssim_better:
             os.replace(new_ckpt, ckpt_path)
             promoted = True
-            logger.info(
-                f"✅ Promoted new model: MSE {incumbent_stats['mse']:.4f} → {candidate_stats['mse']:.4f}, "
-                f"SSIM {incumbent_stats['ssim']:.4f} → {candidate_stats['ssim']:.4f}"
-            )
+            logger.info(f"✅ Promoted new model: MSE {incumbent_stats['mse']:.4f} → {candidate_stats['mse']:.4f}, SSIM {incumbent_stats['ssim']:.4f} → {candidate_stats['ssim']:.4f}")
         else:
             os.remove(new_ckpt)
             promoted = False
-            logger.info(
-                f"🛑 Rejected: ΔMSE={candidate_stats['mse'] - incumbent_stats['mse']:.4e}, "
-                f"ΔSSIM={candidate_stats['ssim'] - incumbent_stats['ssim']:.4e}"
-            )
+            logger.info(f"🛑 Rejected: ΔMSE={candidate_stats['mse'] - incumbent_stats['mse']:.4e}, ΔSSIM={candidate_stats['ssim'] - incumbent_stats['ssim']:.4e}")
     else:
         os.replace(new_ckpt, ckpt_path)
         promoted = True
@@ -248,19 +241,20 @@ def main():
         print("Combining all session data into the main dataset for future runs...")
         combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
         print("Session data combined.")
+
+        # Delete the dataset split file to ensure a fresh split on the next run
+        split_file_path = os.path.join(config.OUTPUT_DIR, getattr(config, 'SPLIT_DATASET_FILENAME', 'dataset_split.pth'))
+        if os.path.exists(split_file_path):
+            try:
+                os.remove(split_file_path)
+                print(f"Deleted dataset split file: {split_file_path}")
+            except OSError as e:
+                print(f"Error deleting dataset split file {split_file_path}: {e}")
     else:
         print("Skipping session combine since model was not promoted.")
 
     # No need to update the current run's replay_ds instance further, as it's ephemeral and will be rebuilt on the next run.
 
-    # Delete the dataset split file to ensure a fresh split on the next run
-    split_file_path = os.path.join(config.OUTPUT_DIR, getattr(config, 'SPLIT_DATASET_FILENAME', 'dataset_split.pth'))
-    if os.path.exists(split_file_path):
-        try:
-            os.remove(split_file_path)
-            print(f"Deleted dataset split file: {split_file_path}")
-        except OSError as e:
-            print(f"Error deleting dataset split file {split_file_path}: {e}")
 
 
 # In[12]:
