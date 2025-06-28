@@ -20,7 +20,11 @@ import numpy as np
 import wandb
 import time
 import datetime
+import logging
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('IncrementalTraining')
 
 # In[2]:
 
@@ -44,6 +48,8 @@ import models
 
 MAX_HOLDOUT = 100
 EVAL_SEED = 42
+EPS_MSE  = 0.995   # ≥ 0.5 % relative MSE improvement
+EPS_SSIM = 0.002   # ≥ 0.002 absolute SSIM gain (~0.2 %)
 
 
 # In[5]:
@@ -192,14 +198,35 @@ def main():
         results = evaluate_models_alternating(
             sampler_a, sampler_b, dl_holdout, config.DEVICE, config.NUM_PREV_FRAMES
         )
-        if results['B']['avg_mse'] < results['A']['avg_mse']:
-            print("New model outperforms old model")
+        promoted = False
+        incumbent_stats = {
+            "mse": results['A']['avg_mse'],
+            "ssim": results['A']['avg_ssim'],
+        }
+        candidate_stats = {
+            "mse": results['B']['avg_mse'],
+            "ssim": results['B']['avg_ssim'],
+        }
+        mse_better = candidate_stats["mse"] < incumbent_stats["mse"] * EPS_MSE
+        ssim_better = candidate_stats["ssim"] > incumbent_stats["ssim"] + EPS_SSIM
+
+        if mse_better and ssim_better:
             os.replace(new_ckpt, ckpt_path)
+            promoted = True
+            logger.info(
+                f"✅ Promoted new model: MSE {incumbent_stats['mse']:.4f} → {candidate_stats['mse']:.4f}, "
+                f"SSIM {incumbent_stats['ssim']:.4f} → {candidate_stats['ssim']:.4f}"
+            )
         else:
-            print("Keeping old model")
             os.remove(new_ckpt)
+            promoted = False
+            logger.info(
+                f"🛑 Rejected: ΔMSE={candidate_stats['mse'] - incumbent_stats['mse']:.4e}, "
+                f"ΔSSIM={candidate_stats['ssim'] - incumbent_stats['ssim']:.4e}"
+            )
     else:
         os.replace(new_ckpt, ckpt_path)
+        promoted = True
 
     # After training, permanently add new sessions to the full dataset
     # The ReplayBuffer's dataset (`train_ds`) is a Subset. To correctly update 
@@ -217,9 +244,12 @@ def main():
     # Ensure all new data (including fresh_ds from this run) is combined into the main persistent dataset.
     # This makes it available for the next execution of incremental_training.ipynb, 
     # where split_dataset will create new train/val splits from the complete data.
-    print("Combining all session data into the main dataset for future runs...")
-    combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
-    print("Session data combined.")
+    if promoted:
+        print("Combining all session data into the main dataset for future runs...")
+        combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
+        print("Session data combined.")
+    else:
+        print("Skipping session combine since model was not promoted.")
 
     # No need to update the current run's replay_ds instance further, as it's ephemeral and will be rebuilt on the next run.
 
