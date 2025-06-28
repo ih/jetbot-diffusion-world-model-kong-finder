@@ -115,7 +115,7 @@ def evaluate_models_alternating(sampler_a, sampler_b, dataloader, device, num_pr
                 metrics[key]['ssim'].append(ssim_val)
                 avg_mse = float(np.mean(metrics[key]['mse']))
                 avg_ssim = float(np.mean(metrics[key]['ssim']))
-                print(f'Sample {idx} Model {key} -> MSE: {mse:.4f}, SSIM: {ssim_val:.4f}, Avg MSE: {avg_mse:.4f}, Avg SSIM: {avg_ssim:.4f}')
+                # print(f'Sample {idx} Model {key} -> MSE: {mse:.4f}, SSIM: {ssim_val:.4f}, Avg MSE: {avg_mse:.4f}, Avg SSIM: {avg_ssim:.4f}')
                 wandb.log({f"{key}/mse": mse, f"{key}/ssim": ssim_val, f"{key}/avg_mse": avg_mse, f"{key}/avg_ssim": avg_ssim, "sample_idx": idx})
     results = {}
     for key, vals in metrics.items():

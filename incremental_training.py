@@ -7,7 +7,7 @@
 
 
 
-# In[1]:
+# In[11]:
 
 
 import os
@@ -18,6 +18,8 @@ import random
 import pickle
 import numpy as np
 import wandb
+import time
+import datetime
 
 
 # In[2]:
@@ -40,7 +42,7 @@ import models
 # In[4]:
 
 
-MAX_HOLDOUT = 10
+MAX_HOLDOUT = 100
 EVAL_SEED = 42
 
 
@@ -231,12 +233,17 @@ def main():
             print(f"Error deleting dataset split file {split_file_path}: {e}")
 
 
-# In[9]:
+# In[12]:
 
 
-wandb.init()
 if __name__ == '__main__':
+    wandb.init()
+    start_time = time.time()
     main()
+    duration = time.time() - start_time
+    formatted_duration = str(datetime.timedelta(seconds=duration))
+    print(f"Incremental training took : {formatted_duration}")
+    wandb.finish()
 
 
 # In[ ]:
