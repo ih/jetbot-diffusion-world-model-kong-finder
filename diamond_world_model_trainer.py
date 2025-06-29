@@ -201,7 +201,18 @@ print("Visualization helpers defined.")
 # In[ ]:
 
 
-def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total):
+def train_denoiser_epoch(
+    denoiser_model,
+    train_dl,
+    opt,
+    scheduler,
+    grad_clip_val,
+    device,
+    epoch_num_for_log,
+    num_train_batches_total,
+    num_val_batches_total,
+    train_step_start=0,
+):
     denoiser_model.train()
     total_loss = 0.0
     progress_bar = tqdm(train_dl, desc=f"Epoch {epoch_num_for_log} [Train]", leave=False)
@@ -246,16 +257,26 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
 
         # Restored wandb logging
         if batch_idx % 10 == 0:
-            global_step = (epoch_num_for_log - 1) * (num_train_batches_total + num_val_batches_total) + batch_idx
+            train_step = train_step_start + batch_idx
             wandb.log({
-                "train_batch_loss": loss.item() * accumulation_steps, # Log un-normalized loss
+                "train_batch_loss": loss.item() * accumulation_steps,  # Log un-normalized loss
                 "train_batch_denoising_loss": logs.get("loss_denoising"),
-            }, step=global_step)
+                "train_step": train_step,
+            })
 
-    return total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
+    avg_loss = total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
+    return avg_loss, train_step_start + len(train_dl)
 
 @torch.no_grad()
-def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total, global_step_start=None):
+def validate_denoiser_epoch(
+    denoiser_model,
+    val_dl,
+    device,
+    epoch_num_for_log,
+    num_train_batches_total,
+    num_val_batches_total,
+    val_step_start=0,
+):
     denoiser_model.eval()
     total_loss = 0.0
     progress_bar = tqdm(val_dl, desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
@@ -285,16 +306,15 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
         
         # Restored wandb logging
         if batch_idx % 10 == 0:
-            if global_step_start is None:
-                global_step = (epoch_num_for_log - 1) * (num_train_batches_total + num_val_batches_total) + num_train_batches_total + batch_idx
-            else:
-                global_step = global_step_start + batch_idx
+            val_step = val_step_start + batch_idx
             wandb.log({
                 "val_batch_loss": loss.item(),
                 "val_batch_denoising_loss": logs.get("loss_denoising"),
-             }, step=global_step)
+                "val_step": val_step,
+            })
              
-    return total_loss / len(val_dl) if len(val_dl) > 0 else 0.0
+    avg_loss = total_loss / len(val_dl) if len(val_dl) > 0 else 0.0
+    return avg_loss, val_step_start + len(val_dl)
 
 
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
@@ -355,6 +375,8 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
 
     best_val = float("inf")
     best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
+
+    val_step_count = 0
 
     # Sampler for visualization (similar to _main_training)
     sampler_cfg_vis = models.DiffusionSamplerConfig(
@@ -431,27 +453,41 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             opt.zero_grad()
 
         # Logging to wandb (more frequently for steps)
-        global_step = start_step_offset + step + 1
-        if wandb.run and (step + 1) % 10 == 0: # Log every 10 steps
+        train_step_count = start_step_offset + step + 1
+        if wandb.run and (step + 1) % 10 == 0:  # Log every 10 steps
             wandb.log({
                 "incremental_step_train_loss": train_loss_val,
                 "incremental_step_denoising_loss": logs.get("loss_denoising"),
-                "incremental_step_learning_rate": scheduler.get_last_lr()[0]
-            }, step=global_step)
+                "incremental_step_learning_rate": scheduler.get_last_lr()[0],
+                "train_step": train_step_count,
+            })
 
         if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
-            current_val_loss = validate_denoiser_epoch(
-                denoiser, val_loader, device, step + 1, 0, 0, global_step_start=global_step
+            val_step_start = val_step_count
+            current_val_loss, val_step_count = validate_denoiser_epoch(
+                denoiser,
+                val_loader,
+                device,
+                step + 1,
+                0,
+                0,
+                val_step_start=val_step_start,
             )
 
             if wandb.run:
-                wandb.log({"incremental_eval_val_loss": current_val_loss}, step=global_step)
+                wandb.log({
+                    "incremental_eval_val_loss": current_val_loss,
+                    "val_step": val_step_start,
+                })
 
             if current_val_loss < best_val:
                 best_val = current_val_loss
-                torch.save({"model_state_dict": denoiser.state_dict(), 'step': global_step, 'val_loss': best_val}, best_path)
+                torch.save({"model_state_dict": denoiser.state_dict(), 'step': train_step_count, 'val_loss': best_val}, best_path)
                 if wandb.run:
-                    wandb.log({"incremental_best_val_loss": best_val}, step=global_step)
+                    wandb.log({
+                        "incremental_best_val_loss": best_val,
+                        "val_step": val_step_start,
+                    })
 
             # Image Sampling (similar to _main_training, simplified for step-based)
             if wandb.run and (step + 1) % config.SAMPLE_EVERY == 0: # Check SAMPLE_EVERY from config
@@ -496,7 +532,8 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                         vis_wandb_log_data_inc["incremental_samples/random_stopped"] = wandb.Image(vis_path_stop, caption=f"Step {step+1} Random Stopped")
                 
                 if vis_wandb_log_data_inc:
-                    wandb.log(vis_wandb_log_data_inc, step=global_step)
+                    vis_wandb_log_data_inc["train_step"] = train_step_count
+                    wandb.log(vis_wandb_log_data_inc)
                 denoiser.train() # Set back to train mode
         pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}", "Val Loss": f"{best_val:.4f}", "LR": f"{scheduler.get_last_lr()[0]:.2e}"})
 
@@ -727,28 +764,38 @@ def _main_training():
     final_epoch_completed = START_EPOCH - 1
     num_train_batches = len(train_dataloader)
     num_val_batches = len(val_dataloader)
+
+    train_step_count = 0
+    val_step_count = 0
     
     for epoch in range(START_EPOCH, NUM_EPOCHS):
         epoch_start_time = time.time()
         current_epoch_num_for_log = epoch + 1
-        avg_train_loss = train_denoiser_epoch(
-            denoiser_model=denoiser, train_dl=train_dataloader, opt=optimizer,
-            scheduler=lr_scheduler, grad_clip_val=GRAD_CLIP_VALUE, device=DEVICE,
+        avg_train_loss, train_step_count = train_denoiser_epoch(
+            denoiser_model=denoiser,
+            train_dl=train_dataloader,
+            opt=optimizer,
+            scheduler=lr_scheduler,
+            grad_clip_val=GRAD_CLIP_VALUE,
+            device=DEVICE,
             epoch_num_for_log=current_epoch_num_for_log,
-            num_train_batches_total=num_train_batches, num_val_batches_total=num_val_batches
+            num_train_batches_total=num_train_batches,
+            num_val_batches_total=num_val_batches,
+            train_step_start=train_step_count,
         )
         
         all_train_losses_for_plot.append(avg_train_loss)
         train_loss_moving_avg_q.append(avg_train_loss)
         current_train_moving_avg = sum(train_loss_moving_avg_q) / len(train_loss_moving_avg_q) if train_loss_moving_avg_q else float('inf')
     
-        avg_val_loss = validate_denoiser_epoch(
-            denoiser_model=denoiser, 
-            val_dl=val_dataloader, 
-            device=DEVICE, 
+        avg_val_loss, val_step_count = validate_denoiser_epoch(
+            denoiser_model=denoiser,
+            val_dl=val_dataloader,
+            device=DEVICE,
             epoch_num_for_log=current_epoch_num_for_log,
-            num_train_batches_total=num_train_batches, 
-            num_val_batches_total=num_val_batches      
+            num_train_batches_total=num_train_batches,
+            num_val_batches_total=num_val_batches,
+            val_step_start=val_step_count,
         )
         all_val_losses_for_plot.append(avg_val_loss)
         val_loss_moving_avg_q.append(avg_val_loss) 
