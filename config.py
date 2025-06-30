@@ -46,7 +46,7 @@ CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
 # --- Output ---
 SAVE_MODEL_EVERY = 100
-SAMPLE_EVERY = 1
+SAMPLE_EVERY = 10
 PLOT_EVERY = 10
 SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
