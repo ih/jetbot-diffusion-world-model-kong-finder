@@ -135,17 +135,90 @@ def combine_sessions_append(session_base_dir, aggregate_image_dir, aggregate_csv
 # In[3]:
 
 
-combine_sessions_append(
-    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_session_data_two_actions_holdout_laundry', 
-    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\images',
-    r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\holdout.csv'
-)
+def gather_new_sessions_only(session_base_dir, processed_csv_path, new_image_dir, new_csv_path):
+    """Collects only sessions not already present in processed_csv_path and
+    writes them to a separate aggregate located at ``new_image_dir`` and ``new_csv_path``.
+    This is useful for incremental training before permanently adding the
+    sessions to the full dataset."""
+    os.makedirs(new_image_dir, exist_ok=True)
+    if os.path.exists(new_csv_path):
+        os.remove(new_csv_path)
+
+    existing_sessions = set()
+    if os.path.exists(processed_csv_path):
+        try:
+            df_existing = pd.read_csv(processed_csv_path)
+            if 'session_id' in df_existing.columns:
+                existing_sessions = set(df_existing['session_id'].unique())
+        except Exception as exc:
+            print(f"Error reading processed CSV {processed_csv_path}: {exc}")
+
+    try:
+        session_dirs = [d for d in os.listdir(session_base_dir)
+                        if os.path.isdir(os.path.join(session_base_dir, d)) and d.startswith('session_')]
+        session_dirs.sort()
+    except FileNotFoundError:
+        print(f"Base session directory not found: {session_base_dir}")
+        return []
+
+    sessions_to_process = [s for s in session_dirs if s not in existing_sessions]
+    print(f"Found {len(sessions_to_process)} new sessions to collect.")
+
+    all_rows = []
+    for session_name in tqdm(sessions_to_process, desc="Collecting New Sessions"):
+        session_path = os.path.join(session_base_dir, session_name)
+        session_csv = os.path.join(session_path, 'data.csv')
+        session_img_dir = os.path.join(session_path, 'images')
+        if not os.path.exists(session_csv) or not os.path.exists(session_img_dir):
+            print(f"Skipping {session_name}, missing data.csv or images")
+            continue
+        try:
+            df = pd.read_csv(session_csv)
+        except Exception as exc:
+            print(f"Error reading {session_csv}: {exc}")
+            continue
+        for _, row in df.iterrows():
+            orig_rel = row['image_path']
+            orig_abs = os.path.join(session_path, orig_rel)
+            new_filename = f"{session_name}_{os.path.basename(orig_rel)}"
+            new_rel = os.path.join('images', new_filename)
+            new_abs = os.path.join(new_image_dir, new_filename)
+            if not os.path.exists(orig_abs):
+                continue
+            if not os.path.exists(new_abs):
+                try:
+                    shutil.copy2(orig_abs, new_abs)
+                except Exception as exc:
+                    print(f"Could not copy {orig_abs}: {exc}")
+                    continue
+            all_rows.append({'session_id': session_name,
+                             'image_path': new_rel,
+                             'timestamp': row.get('timestamp', ''),
+                             'action': row['action']})
+
+    if all_rows:
+        pd.DataFrame(all_rows).to_csv(new_csv_path, index=False)
+        print(f"Wrote {len(all_rows)} entries to {new_csv_path}")
+    else:
+        print("No new session data found.")
+    return sessions_to_process
 
 
 # In[3]:
 
 
-combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
+
+# combine_sessions_append(
+#     r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_session_data_two_actions_holdout_laundry', 
+#     r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\images',
+#     r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\holdout.csv'
+# )
+
+# In[4]:
+
+
+if __name__ == '__main__':
+    combine_sessions_append(config.SESSION_DATA_DIR, config.IMAGE_DIR, config.CSV_PATH)
 
 
 # In[ ]:

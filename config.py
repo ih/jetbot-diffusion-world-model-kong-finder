@@ -9,6 +9,11 @@ DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 # DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'laundry_data_30_sessions.csv')
+NEW_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_new_data')
+NEW_IMAGE_DIR = os.path.join(NEW_DATA_DIR, 'images')
+NEW_CSV_PATH = os.path.join(NEW_DATA_DIR, 'new.csv')
+REPLAY_DIR = os.path.join(AUXILIARY_DIR, 'replay_buffer')
+REPLAY_INDEX_PATH = os.path.join(REPLAY_DIR, 'index.pkl')
 IMAGE_SIZE = 64
 NUM_PREV_FRAMES = 4
 MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_subset.csv")
@@ -35,13 +40,13 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 64
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND_laundry_30_sessions')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND_laundry_incremental')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
 # --- Output ---
 SAVE_MODEL_EVERY = 100
-SAMPLE_EVERY = 1
+SAMPLE_EVERY = 10
 PLOT_EVERY = 10
 SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
@@ -50,6 +55,7 @@ SPLIT_DATASET_FILENAME = 'dataset_split.pth'
 EARLY_STOPPING_PATIENCE = 5
 EARLY_STOPPING_PERCENTAGE = .1
 MIN_EPOCHS = 5
+NUM_TRAIN_STEPS = 1000
 
 # --- Data-rate control ----------------------------------------------------
 TARGET_HZ            = 5          # ← choose 5 or 10
@@ -73,10 +79,15 @@ DM_IS_UPSAMPLER = False
 DM_UPSAMPLING_FACTOR = None # Or an integer like 2, 4 if DM_IS_UPSAMPLER is True
 
 # Sampler specific (for inference/visualization)
+SAMPLER_ORDER = 1
 SAMPLER_NUM_STEPS = 50
 SAMPLER_SIGMA_MIN = 0.002
 SAMPLER_SIGMA_MAX = 80.0
 SAMPLER_RHO = 7.0
+SAMPLER_S_CHURN = 0.0
+SAMPLER_S_TMIN = 0.0
+SAMPLER_S_TMAX = float("inf")
+SAMPLER_S_NOISE = 1.0
 
 # Training specific (GRAD_CLIP_VALUE might be new if not used before)
 GRAD_CLIP_VALUE = 10.0
@@ -94,6 +105,9 @@ DM_SIGMA_MAX_TRAIN = 20.0  # Max sigma during training
 os.makedirs(SESSION_DATA_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
+os.makedirs(NEW_DATA_DIR, exist_ok=True)
+os.makedirs(NEW_IMAGE_DIR, exist_ok=True)
+os.makedirs(REPLAY_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(SAMPLE_DIR, exist_ok=True)
