@@ -257,7 +257,9 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
                 "train_step": train_step,
             })
 
-    return total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
+    avg_loss = total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
+    final_step = train_step_start + len(train_dl)
+    return avg_loss, final_step
 
 @torch.no_grad()
 def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total, val_step_start=0):
@@ -297,7 +299,9 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
                 "val_step": val_step,
             })
              
-    return total_loss / len(val_dl) if len(val_dl) > 0 else 0.0
+    avg_loss = total_loss / len(val_dl) if len(val_dl) > 0 else 0.0
+    final_step = val_step_start + len(val_dl)
+    return avg_loss, final_step
 
 
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
@@ -382,6 +386,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         moving_action_val_vis_inc = getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
 
+    val_step_count = 0
     train_iter = iter(train_loader)
     pbar = tqdm(range(num_steps), desc="Incremental Training Steps")
 
@@ -750,7 +755,10 @@ def _main_training():
     final_epoch_completed = START_EPOCH - 1
     num_train_batches = len(train_dataloader)
     num_val_batches = len(val_dataloader)
-    
+
+    train_step_count = 0
+    val_step_count = 0
+
     for epoch in range(START_EPOCH, NUM_EPOCHS):
         epoch_start_time = time.time()
         current_epoch_num_for_log = epoch + 1
