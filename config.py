@@ -52,10 +52,23 @@ SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
 TEST_SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'test_samples')
 SPLIT_DATASET_FILENAME = 'dataset_split.pth'
-EARLY_STOPPING_PATIENCE = 5
-EARLY_STOPPING_PERCENTAGE = .1
-MIN_EPOCHS = 5
-NUM_TRAIN_STEPS = 1000
+
+# --- Incremental Training & Early Stopping (2000-Step Run) ---
+NUM_TRAIN_STEPS = 2000
+
+# Validate every 100 steps. This gives you 20 validation points over the whole run.
+VALIDATE_EVERY = 100
+
+# Stop if there's no improvement after ~20% of the total run (400 steps).
+# This gives the model 4 validation checks to show improvement before stopping.
+EARLY_STOP_PATIENCE_STEPS = 400
+
+# --- Divergence Guard (These can often remain the same) ---
+# Stop if training loss increases for 3 consecutive validation checks.
+TRAIN_DIVERGE_PATIENCE_CHECKS = 3
+
+# A 5% jump in training loss is still a good indicator of instability.
+TRAIN_DIVERGE_THRESHOLD = 0.05
 
 # --- Data-rate control ----------------------------------------------------
 TARGET_HZ            = 5          # ← choose 5 or 10

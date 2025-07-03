@@ -40,6 +40,7 @@ import random
 from torch.optim.lr_scheduler import LambdaLR
 
 import wandb # Will be initialized in _main_training
+import copy
 
 # Your project's specific imports
 import config # Your config.py
@@ -307,10 +308,9 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
 
 
-def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_steps=None):
-    """Train a denoiser model with the provided dataloaders.
 
-    ``max_steps`` bounds training time regardless of dataset size."""
+def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_steps=None):
+    """Train a denoiser model with robust, step-based early stopping."""
     device = config.DEVICE
     num_steps = max_steps or config.NUM_TRAIN_STEPS
 
@@ -357,13 +357,8 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     def lr_lambda(step: int):
         warmup = config.LEARNING_RATE_WARMUP_STEPS
         return float(step) / float(max(1, warmup)) if step < warmup else 1.0
-
     scheduler = LambdaLR(opt, lr_lambda)
 
-    best_val = float("inf")
-    best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
-
-    # Sampler for visualization (similar to _main_training)
     sampler_cfg_vis = models.DiffusionSamplerConfig(
         num_steps_denoising=config.SAMPLER_NUM_STEPS,
         sigma_min=config.SAMPLER_SIGMA_MIN,
@@ -377,7 +372,6 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     )
     diffusion_sampler_vis = models.DiffusionSampler(denoiser=denoiser, cfg=sampler_cfg_vis)
 
-    # Prepare filtered validation subsets for visualization (similar to _main_training)
     val_stopped_subset_inc = []
     val_moving_subset_inc = []
     if hasattr(val_loader, 'dataset') and len(val_loader.dataset) > 0:
@@ -385,6 +379,18 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         val_stopped_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=0.0)
         moving_action_val_vis_inc = getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
+
+    best_val_loss = float('inf')
+    steps_since_last_improvement = 0
+    best_model_state_dict = None
+
+    validate_every = getattr(config, 'VALIDATE_EVERY', 50)
+    patience_steps = getattr(config, 'EARLY_STOP_PATIENCE_STEPS', 150)
+
+    divergence_patience = getattr(config, 'TRAIN_DIVERGE_PATIENCE_CHECKS', 3)
+    divergence_threshold = getattr(config, 'TRAIN_DIVERGE_THRESHOLD', 0.05)
+    last_train_loss = float('inf')
+    divergence_counter = 0
 
     val_step_count = 0
     train_iter = iter(train_loader)
@@ -400,24 +406,17 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         if isinstance(batch, models.Batch):
             current_batch_obj = batch.to(device)
         else:
-            # Unpack the batch from the DataLoader
             target_img_batch, action_batch, prev_frames_flat_batch = batch
-
-            # Move tensors to the correct device
             target_img_batch = target_img_batch.to(device)
             action_batch = action_batch.to(device)
             prev_frames_flat_batch = prev_frames_flat_batch.to(device)
-
-            # Reconstruct the logic from train_denoiser_epoch to create the Batch object
             current_batch_size = target_img_batch.shape[0]
             num_prev_frames = config.NUM_PREV_FRAMES
             c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
-
             prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
             batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
-            batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()  # Ensure this matches the expected action format for the model
+            batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
             batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
-
             current_batch_obj = models.Batch(
                 obs=batch_obs_tensor,
                 act=batch_act_tensor,
@@ -426,8 +425,8 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             )
 
         denoiser.train()
-        loss, logs = denoiser(current_batch_obj) # Get logs as well
-        train_loss_val = loss.item() # Store for logging
+        loss, logs = denoiser(current_batch_obj)
+        train_loss_val = loss.item()
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
 
@@ -438,9 +437,8 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             scheduler.step()
             opt.zero_grad()
 
-        # Logging to wandb (more frequently for steps)
         train_step_count = start_step_offset + step + 1
-        if wandb.run and (step + 1) % 10 == 0: # Log every 10 steps
+        if wandb.run and (step + 1) % 10 == 0:
             wandb.log({
                 "incremental_step_train_loss": train_loss_val,
                 "incremental_step_denoising_loss": logs.get("loss_denoising"),
@@ -448,46 +446,43 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 "train_step": train_step_count,
             })
 
-        if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
+        if (step + 1) % validate_every == 0 or (step + 1) == num_steps:
             val_step_start = val_step_count
             current_val_loss, val_step_count = validate_denoiser_epoch(
                 denoiser, val_loader, device, step + 1, 0, 0, val_step_start=val_step_start
             )
 
             if wandb.run:
-                wandb.log({
-                    "incremental_eval_val_loss": current_val_loss,
-                    "val_step": val_step_start,
-                })
+                wandb.log({"incremental_eval_val_loss": current_val_loss, "val_step": val_step_start})
 
-            if current_val_loss < best_val:
-                best_val = current_val_loss
-                torch.save({"model_state_dict": denoiser.state_dict(), 'step': train_step_count, 'val_loss': best_val}, best_path)
-                if wandb.run:
-                    wandb.log({
-                        "incremental_best_val_loss": best_val,
-                        "val_step": val_step_start,
-                    })
+            if current_val_loss < best_val_loss:
+                best_val_loss = current_val_loss
+                steps_since_last_improvement = 0
+                best_model_state_dict = copy.deepcopy(denoiser.state_dict())
+                pbar.set_description(f"New best val_loss: {best_val_loss:.4f}")
+            else:
+                steps_since_last_improvement += validate_every
 
-            # Image Sampling (similar to _main_training, simplified for step-based)
-            if wandb.run and (step + 1) % config.SAMPLE_EVERY == 0: # Check SAMPLE_EVERY from config
+            if train_loss_val > last_train_loss * (1 + divergence_threshold):
+                divergence_counter += 1
+            else:
+                divergence_counter = 0
+            last_train_loss = train_loss_val
+
+            if wandb.run and (step + 1) % config.SAMPLE_EVERY == 0:
                 denoiser.eval()
                 vis_wandb_log_data_inc = {}
                 fixed_sample_idx_inc = getattr(config, 'FIXED_VIS_SAMPLE_IDX', 0)
-
                 if hasattr(val_loader, 'dataset') and fixed_sample_idx_inc < len(val_loader.dataset):
                     fixed_sample_data_inc = val_loader.dataset[fixed_sample_idx_inc]
-                    # Ensure sample_data is a tuple (img, act, prev_frames_flat)
                     if not (isinstance(fixed_sample_data_inc, tuple) and len(fixed_sample_data_inc) == 3):
-                         # Try to get it from .dataset if val_loader.dataset is a Subset
                         if isinstance(val_loader.dataset, torch.utils.data.Subset):
                             original_dataset = val_loader.dataset.dataset
                             original_idx = val_loader.dataset.indices[fixed_sample_idx_inc]
                             fixed_sample_data_inc = original_dataset[original_idx]
                         else:
-                            print(f"Skipping fixed sample visualization: data format error or direct access failed.")
-                            fixed_sample_data_inc = None 
-                            
+                            print("Skipping fixed sample visualization: data format error or direct access failed.")
+                            fixed_sample_data_inc = None
                     if fixed_sample_data_inc:
                         prev_obs_fixed_inc, prev_act_fixed_inc, gt_fixed_batch_inc, gt_prev_frames_fixed_seq_inc = prepare_single_sample_for_sampler(fixed_sample_data_inc, device)
                         with torch.no_grad():
@@ -500,8 +495,6 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                                 step + 1, config.SAMPLE_DIR, prefix=f"inc_vis_fixed_step{step+1}"
                             )
                             vis_wandb_log_data_inc[f"incremental_samples/fixed_idx_{fixed_sample_idx_inc}"] = wandb.Image(vis_path_fixed_inc, caption=f"Step {step+1} Fixed Sample")
-
-                # Simplified: Add one random sample from val_stopped_subset_inc if available
                 if len(val_stopped_subset_inc) > 0:
                     stopped_sample_data_inc = val_stopped_subset_inc[random.randint(0, len(val_stopped_subset_inc) - 1)]
                     prev_obs_stop, prev_act_stop, gt_batch_stop, gt_prev_seq_stop = prepare_single_sample_for_sampler(stopped_sample_data_inc, device)
@@ -510,8 +503,6 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                     if gen_out_stop:
                         vis_path_stop = save_visualization_samples(gen_out_stop[0][0], gt_batch_stop[0], gt_prev_seq_stop, step+1, config.SAMPLE_DIR, prefix=f"inc_vis_stopped_step{step+1}")
                         vis_wandb_log_data_inc["incremental_samples/random_stopped"] = wandb.Image(vis_path_stop, caption=f"Step {step+1} Random Stopped")
-
-                # Simplified: Add one random sample from val_moving_subset_inc_subset_inc if available
                 if len(val_moving_subset_inc) > 0:
                     moving_sample_data_inc = val_moving_subset_inc[random.randint(0, len(val_moving_subset_inc) - 1)]
                     prev_obs_move, prev_act_move, gt_batch_move, gt_prev_seq_move = prepare_single_sample_for_sampler(moving_sample_data_inc, device)
@@ -520,16 +511,34 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                     if gen_out_move:
                         vis_path_move = save_visualization_samples(gen_out_move[0][0], gt_batch_move[0], gt_prev_seq_move, step+1, config.SAMPLE_DIR, prefix=f"inc_vis_moving_step{step+1}")
                         vis_wandb_log_data_inc["incremental_samples/random_moving"] = wandb.Image(vis_path_move, caption=f"Step {step+1} Random Moving")
-
-                
                 if vis_wandb_log_data_inc:
                     vis_wandb_log_data_inc["train_step"] = train_step_count
                     wandb.log(vis_wandb_log_data_inc)
-                denoiser.train() # Set back to train mode
-        pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}", "Val Loss": f"{best_val:.4f}", "LR": f"{scheduler.get_last_lr()[0]:.2e}"})
+                denoiser.train()
+
+            if steps_since_last_improvement >= patience_steps:
+                print(f"🛑 Early stopping triggered: No improvement in {patience_steps} steps.")
+                if wandb.run:
+                    wandb.log({"early_stop_reason": "patience_met", "early_stop_step": step + 1})
+                break
+            if divergence_counter >= divergence_patience:
+                print(f"🛑 Early stopping triggered: Training loss diverged for {divergence_patience} checks.")
+                if wandb.run:
+                    wandb.log({"early_stop_reason": "loss_diverged", "early_stop_step": step + 1})
+                break
+
+        pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}", "Best Val": f"{best_val_loss:.4f}", "Steps w/o Improve": f"{steps_since_last_improvement}"})
 
     pbar.close()
-    return best_path
+
+    if best_model_state_dict:
+        print(f"✅ Restoring model to best validation loss: {best_val_loss:.4f}")
+        denoiser.load_state_dict(best_model_state_dict)
+
+    final_best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
+    torch.save({"model_state_dict": denoiser.state_dict(), 'step': step + 1, 'val_loss': best_val_loss}, final_best_path)
+
+    return final_best_path
 
 
 # In[ ]:
