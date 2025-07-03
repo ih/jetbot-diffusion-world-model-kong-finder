@@ -44,6 +44,7 @@ import wandb # Will be initialized in _main_training
 # Your project's specific imports
 import config # Your config.py
 import models # Your models.py (which should import from diamond_models.ipynb)
+import copy # Make sure to import copy at the top of the file
 
 # Import dataset from your jetbot_dataset.ipynb
 from importnb import Notebook
@@ -308,12 +309,13 @@ print("Training and validation epoch functions adapted for Batch object and Deno
 
 
 def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_steps=None):
-    """Train a denoiser model with the provided dataloaders.
-
-    ``max_steps`` bounds training time regardless of dataset size."""
+    """
+    Train a denoiser model with robust, step-based early stopping.
+    """
     device = config.DEVICE
     num_steps = max_steps or config.NUM_TRAIN_STEPS
 
+    # --- Model and Optimizer Setup (remains the same) ---
     inner_cfg = models.InnerModelConfig(
         img_channels=config.DM_IMG_CHANNELS,
         num_steps_conditioning=config.NUM_PREV_FRAMES,
@@ -357,11 +359,26 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     def lr_lambda(step: int):
         warmup = config.LEARNING_RATE_WARMUP_STEPS
         return float(step) / float(max(1, warmup)) if step < warmup else 1.0
-
     scheduler = LambdaLR(opt, lr_lambda)
 
-    best_val = float("inf")
-    best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
+    # --- Robust Early Stopping & Checkpointing Setup ---
+    best_val_loss = float('inf')
+    steps_since_last_improvement = 0
+    best_model_state_dict = None
+
+    validate_every = getattr(config, 'VALIDATE_EVERY', 50)
+    patience_steps = getattr(config, 'EARLY_STOP_PATIENCE_STEPS', 150)
+
+    # Divergence Guard Setup
+    divergence_patience = getattr(config, 'TRAIN_DIVERGE_PATIENCE_CHECKS', 3)
+    divergence_threshold = getattr(config, 'TRAIN_DIVERGE_THRESHOLD', 0.05)
+    last_train_loss = float('inf')
+    divergence_counter = 0
+
+    # --- Training Loop ---
+    val_step_count = 0
+    train_iter = iter(train_loader)
+    pbar = tqdm(range(num_steps), desc="Incremental Training Steps")
 
     # Sampler for visualization (similar to _main_training)
     sampler_cfg_vis = models.DiffusionSamplerConfig(
@@ -386,17 +403,16 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         moving_action_val_vis_inc = getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
 
-    val_step_count = 0
-    train_iter = iter(train_loader)
-    pbar = tqdm(range(num_steps), desc="Incremental Training Steps")
-
     for step in pbar:
+        # --- Standard Training Step (remains the same) ---
+        # (Batch creation, forward pass, backward pass, optimizer step)
         try:
             batch = next(train_iter)
         except StopIteration:
             train_iter = iter(train_loader)
             batch = next(train_iter)
 
+        # (Code to prepare batch object `current_batch_obj` remains the same)
         if isinstance(batch, models.Batch):
             current_batch_obj = batch.to(device)
         else:
@@ -426,8 +442,8 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             )
 
         denoiser.train()
-        loss, logs = denoiser(current_batch_obj) # Get logs as well
-        train_loss_val = loss.item() # Store for logging
+        loss, logs = denoiser(current_batch_obj)
+        train_loss_val = loss.item()
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
 
@@ -439,7 +455,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             opt.zero_grad()
 
         # Logging to wandb (more frequently for steps)
-        train_step_count = start_step_offset + step + 1
+        train_step_count = start_step_offset + step + 1 # Define train_step_count here
         if wandb.run and (step + 1) % 10 == 0: # Log every 10 steps
             wandb.log({
                 "incremental_step_train_loss": train_loss_val,
@@ -448,29 +464,20 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 "train_step": train_step_count,
             })
 
-        if (step + 1) % config.SAVE_MODEL_EVERY == 0 or (step + 1) == num_steps:
+        # --- Validation, Early Stopping, and Divergence Check ---
+        if (step + 1) % validate_every == 0 or (step + 1) == num_steps:
             val_step_start = val_step_count
             current_val_loss, val_step_count = validate_denoiser_epoch(
                 denoiser, val_loader, device, step + 1, 0, 0, val_step_start=val_step_start
             )
 
+            # Log validation loss
             if wandb.run:
-                wandb.log({
-                    "incremental_eval_val_loss": current_val_loss,
-                    "val_step": val_step_start,
-                })
-
-            if current_val_loss < best_val:
-                best_val = current_val_loss
-                torch.save({"model_state_dict": denoiser.state_dict(), 'step': train_step_count, 'val_loss': best_val}, best_path)
-                if wandb.run:
-                    wandb.log({
-                        "incremental_best_val_loss": best_val,
-                        "val_step": val_step_start,
-                    })
+                wandb.log({"incremental_eval_val_loss": current_val_loss, "val_step": val_step_start})
 
             # Image Sampling (similar to _main_training, simplified for step-based)
-            if wandb.run and (step + 1) % config.SAMPLE_EVERY == 0: # Check SAMPLE_EVERY from config
+            # Tied to validation frequency for now.
+            if wandb.run and hasattr(config, 'SAMPLE_EVERY') and (step + 1) % config.SAMPLE_EVERY == 0 :
                 denoiser.eval()
                 vis_wandb_log_data_inc = {}
                 fixed_sample_idx_inc = getattr(config, 'FIXED_VIS_SAMPLE_IDX', 0)
@@ -520,16 +527,53 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                     if gen_out_move:
                         vis_path_move = save_visualization_samples(gen_out_move[0][0], gt_batch_move[0], gt_prev_seq_move, step+1, config.SAMPLE_DIR, prefix=f"inc_vis_moving_step{step+1}")
                         vis_wandb_log_data_inc["incremental_samples/random_moving"] = wandb.Image(vis_path_move, caption=f"Step {step+1} Random Moving")
-
                 
                 if vis_wandb_log_data_inc:
-                    vis_wandb_log_data_inc["train_step"] = train_step_count
+                    vis_wandb_log_data_inc["train_step"] = train_step_count # Use the same train_step_count
                     wandb.log(vis_wandb_log_data_inc)
                 denoiser.train() # Set back to train mode
-        pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}", "Val Loss": f"{best_val:.4f}", "LR": f"{scheduler.get_last_lr()[0]:.2e}"})
+
+            # Check for improvement
+            if current_val_loss < best_val_loss:
+                best_val_loss = current_val_loss
+                steps_since_last_improvement = 0
+                best_model_state_dict = copy.deepcopy(denoiser.state_dict())
+                pbar.set_description(f"New best val_loss: {best_val_loss:.4f}")
+            else:
+                steps_since_last_improvement += validate_every
+
+            # Check for training loss divergence
+            if train_loss_val > last_train_loss * (1 + divergence_threshold):
+                divergence_counter += 1
+            else:
+                divergence_counter = 0 # Reset if loss is stable
+            last_train_loss = train_loss_val
+
+            # Check stopping conditions
+            if steps_since_last_improvement >= patience_steps:
+                print(f"🛑 Early stopping triggered: No improvement in {patience_steps} steps.")
+                if wandb.run: wandb.log({"early_stop_reason": "patience_met", "early_stop_step": step + 1})
+                break
+
+            if divergence_counter >= divergence_patience:
+                print(f"🛑 Early stopping triggered: Training loss diverged for {divergence_patience} checks.")
+                if wandb.run: wandb.log({"early_stop_reason": "loss_diverged", "early_stop_step": step + 1})
+                break
+
+        pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}", "Best Val": f"{best_val_loss:.4f}", "Steps w/o Improve": f"{steps_since_last_improvement}"})
 
     pbar.close()
-    return best_path
+
+    # --- Restore Best Model and Save ---
+    if best_model_state_dict:
+        print(f"✅ Restoring model to best validation loss: {best_val_loss:.4f}")
+        denoiser.load_state_dict(best_model_state_dict)
+
+    # Save the final, best model for promotion testing
+    final_best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
+    torch.save({"model_state_dict": denoiser.state_dict(), 'step': step + 1, 'val_loss': best_val_loss}, final_best_path)
+
+    return final_best_path
 
 
 # In[ ]:
