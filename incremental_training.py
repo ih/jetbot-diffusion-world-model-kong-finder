@@ -45,7 +45,7 @@ import models
 # In[4]:
 
 
-MAX_HOLDOUT = 100
+MAX_HOLDOUT = 250
 EVAL_SEED = 42
 EPS_MSE  = 0.995   # ≥ 0.5 % relative MSE improvement
 EPS_SSIM = 0.002   # ≥ 0.002 absolute SSIM gain (~0.2 %)
