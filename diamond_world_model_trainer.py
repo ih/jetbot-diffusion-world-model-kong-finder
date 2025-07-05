@@ -102,8 +102,11 @@ def mse_ssim(pred, tgt):
 def make_debug_panel(pred, tgt, prev_seq):
     diff = (pred - tgt).abs()
     diff = diff / diff.max().clamp(min=1e-4)
-    panel = torch.cat([*prev_seq, tgt, pred, diff], dim=0)
-    return vutils.make_grid(panel, nrow=len(prev_seq) + 3, normalize=True)
+    panel = torch.cat(
+        [prev_seq, tgt.unsqueeze(0), pred.unsqueeze(0), diff.unsqueeze(0)], dim=0
+    )
+    nrow = prev_seq.shape[0] + 3
+    return vutils.make_grid(panel, nrow=nrow, normalize=True)
 
 
 def split_dataset():
