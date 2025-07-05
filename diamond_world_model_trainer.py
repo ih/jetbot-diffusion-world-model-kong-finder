@@ -31,13 +31,17 @@ import os
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 import time
-import datetime # For epoch timing and timestamping
+import datetime  # For epoch timing and timestamping
 from torchvision import transforms
-from collections import deque # For moving average
-from dataclasses import dataclass 
-from typing import List, Optional, Dict, Any 
+from collections import deque  # For moving average
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Any
 import random
 from torch.optim.lr_scheduler import LambdaLR
+import heapq
+import json
+import torchvision.utils as vutils
+from skimage.metrics import structural_similarity as ssim
 
 import wandb # Will be initialized in _main_training
 
@@ -63,6 +67,43 @@ DM_NUM_ACTIONS = getattr(config, 'DM_NUM_ACTIONS', 2)
 
 
 # In[ ]:
+
+
+WORST_K = 50
+
+def _to_batch(batch, device=config.DEVICE):
+    if isinstance(batch, models.Batch):
+        return batch.to(device)
+    target_img_batch, action_batch, prev_frames_flat_batch = batch
+    b = target_img_batch.shape[0]
+    target_img_batch = target_img_batch.to(device)
+    action_batch = action_batch.to(device)
+    prev_frames_flat_batch = prev_frames_flat_batch.to(device)
+    num_prev_frames = config.NUM_PREV_FRAMES
+    c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
+    prev_seq = prev_frames_flat_batch.view(b, num_prev_frames, c, h, w)
+    obs = torch.cat((prev_seq, target_img_batch.unsqueeze(1)), dim=1)
+    act = action_batch.repeat(1, num_prev_frames).long()
+    mask = torch.ones(b, num_prev_frames + 1, device=device, dtype=torch.bool)
+    return models.Batch(obs=obs, act=act, mask_padding=mask, info=[{}] * b)
+
+
+def mse_ssim(pred, tgt):
+    mse = F.mse_loss(pred, tgt, reduction="none").mean((1, 2, 3))
+    ssim_vals = torch.tensor([
+        ssim(p.permute(1, 2, 0).cpu().numpy(),
+             t.permute(1, 2, 0).cpu().numpy(),
+             data_range=1.0, channel_axis=-1)
+        for p, t in zip(pred, tgt)
+    ], device=pred.device)
+    return mse, ssim_vals
+
+
+def make_debug_panel(pred, tgt, prev_seq):
+    diff = (pred - tgt).abs()
+    diff = diff / diff.max().clamp(min=1e-4)
+    panel = torch.cat([*prev_seq, tgt, pred, diff], dim=0)
+    return vutils.make_grid(panel, nrow=len(prev_seq) + 3, normalize=True)
 
 
 def split_dataset():
@@ -308,6 +349,141 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
 
 
+@torch.no_grad()
+def validate_denoiser_epoch_v2(
+    denoiser_model,
+    val_dl,
+    device,
+    epoch_num_for_log,
+    num_train_batches_total,
+    num_val_batches_total,
+    val_step_start=0,
+):
+    denoiser_model.eval()
+
+    sampler_cfg = models.DiffusionSamplerConfig(
+        num_steps_denoising=config.SAMPLER_NUM_STEPS,
+        sigma_min=config.SAMPLER_SIGMA_MIN,
+        sigma_max=config.SAMPLER_SIGMA_MAX,
+        rho=config.SAMPLER_RHO,
+        order=config.SAMPLER_ORDER,
+        s_churn=config.SAMPLER_S_CHURN,
+        s_tmin=config.SAMPLER_S_TMIN,
+        s_tmax=config.SAMPLER_S_TMAX,
+        s_noise=config.SAMPLER_S_NOISE,
+    )
+    diffusion_sampler = models.DiffusionSampler(denoiser=denoiser_model, cfg=sampler_cfg)
+
+    worst_mse, worst_ssim = [], []
+    all_mse, all_ssim = [], []
+    move_mse, move_ssim, stop_mse, stop_ssim = [], [], [], []
+    global_idx = 0
+
+    progress_bar = tqdm(val_dl, desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
+    for batch_idx, batch in enumerate(progress_bar):
+        current_batch = _to_batch(batch, device)
+        prev_obs = current_batch.obs[:, :-1]
+        prev_act = current_batch.act
+        pred, _ = diffusion_sampler.sample(prev_obs=prev_obs, prev_act=prev_act)
+        tgt = current_batch.obs[:, -1]
+
+        mse, ssim_vals = mse_ssim(pred, tgt)
+        all_mse.append(mse)
+        all_ssim.append(ssim_vals)
+
+        move_mask = current_batch.act[:, 0] == 1
+        stop_mask = ~move_mask
+        if move_mask.any():
+            move_mse.append(mse[move_mask])
+            move_ssim.append(ssim_vals[move_mask])
+        if stop_mask.any():
+            stop_mse.append(mse[stop_mask])
+            stop_ssim.append(ssim_vals[stop_mask])
+
+        for i, (m, s) in enumerate(zip(mse, ssim_vals)):
+            item = (
+                m.item(),
+                s.item(),
+                global_idx + i,
+                pred[i].cpu(),
+                tgt[i].cpu(),
+                current_batch.obs[i, :-1].cpu(),
+                current_batch.act[i, 0].item(),
+            )
+            if len(worst_mse) < WORST_K:
+                heapq.heappush(worst_mse, item)
+            elif m > worst_mse[0][0]:
+                heapq.heapreplace(worst_mse, item)
+
+            if len(worst_ssim) < WORST_K:
+                heapq.heappush(worst_ssim, item)
+            elif s < worst_ssim[0][1]:
+                heapq.heapreplace(worst_ssim, item)
+
+        global_idx += mse.numel()
+
+        if batch_idx % 10 == 0:
+            val_step = val_step_start + batch_idx
+            wandb.log(
+                {
+                    "val_batch_mse": mse.mean().item(),
+                    "val_batch_ssim": ssim_vals.mean().item(),
+                    "val_step": val_step,
+                }
+            )
+
+    mse_vec = torch.cat(all_mse)
+    ssim_vec = torch.cat(all_ssim)
+
+    mse_move = torch.cat(move_mse).mean().item() if move_mse else 0
+    ssim_move = torch.cat(move_ssim).mean().item() if move_ssim else 0
+    mse_stop = torch.cat(stop_mse).mean().item() if stop_mse else 0
+    ssim_stop = torch.cat(stop_ssim).mean().item() if stop_ssim else 0
+
+    wandb.log(
+        {
+            "val/mse_mean": mse_vec.mean().item(),
+            "val/ssim_mean": ssim_vec.mean().item(),
+            "val/mse_move": mse_move,
+            "val/ssim_move": ssim_move,
+            "val/mse_stop": mse_stop,
+            "val/ssim_stop": ssim_stop,
+        }
+    )
+
+    for rank, (m, s, ds_idx, pred_img, tgt_img, prev_seq, act) in enumerate(
+        sorted(worst_mse, key=lambda x: -x[0])
+    ):
+        grid = make_debug_panel(pred_img, tgt_img, prev_seq)
+        wandb.log(
+            {
+                f"worst_mse/pred_vs_gt_{rank}": wandb.Image(
+                    grid, caption=f"idx={ds_idx}, act={act}, mse={m:.4f}, ssim={s:.3f}"
+                )
+            },
+            commit=False,
+        )
+
+    for rank, (m, s, ds_idx, pred_img, tgt_img, prev_seq, act) in enumerate(
+        sorted(worst_ssim, key=lambda x: x[1])
+    ):
+        grid = make_debug_panel(pred_img, tgt_img, prev_seq)
+        wandb.log(
+            {
+                f"worst_ssim/pred_vs_gt_{rank}": wandb.Image(
+                    grid, caption=f"idx={ds_idx}, act={act}, mse={m:.4f}, ssim={s:.3f}"
+                )
+            },
+            commit=False,
+        )
+
+    bad_idx_path = os.path.join(config.OUTPUT_DIR, f"bad_samples_epoch{epoch_num_for_log}.json")
+    json.dump([int(t[2]) for t in worst_mse], open(bad_idx_path, "w"))
+
+    final_step = val_step_start + len(val_dl)
+    return mse_vec.mean().item(), final_step
+
+
 def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_steps=None):
     """
     Train a denoiser model with robust, step-based early stopping.
@@ -467,7 +643,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         # --- Validation, Early Stopping, and Divergence Check ---
         if (step + 1) % validate_every == 0 or (step + 1) == num_steps:
             val_step_start = val_step_count
-            current_val_loss, val_step_count = validate_denoiser_epoch(
+            current_val_loss, val_step_count = validate_denoiser_epoch_v2(
                 denoiser, val_loader, device, step + 1, 0, 0, val_step_start=val_step_start
             )
 
@@ -818,7 +994,7 @@ def _main_training():
         train_loss_moving_avg_q.append(avg_train_loss)
         current_train_moving_avg = sum(train_loss_moving_avg_q) / len(train_loss_moving_avg_q) if train_loss_moving_avg_q else float('inf')
     
-        avg_val_loss, val_step_count = validate_denoiser_epoch(
+        avg_val_loss, val_step_count = validate_denoiser_epoch_v2(
             denoiser_model=denoiser, 
             val_dl=val_dataloader, 
             device=DEVICE, 
