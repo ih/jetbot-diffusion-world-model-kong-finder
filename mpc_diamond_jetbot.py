@@ -456,7 +456,7 @@ def review_step(initial_obs_buffer,
 print("Visualization function defined.")
 
 
-# In[8]:
+# In[ ]:
 
 
 print("--- Starting MPC Control Loop (Diamond Model) ---")
@@ -503,12 +503,11 @@ try:
             print("Planning failed, stopping.")
             break
 
-        # 2. Display for review (Shows current history & future predictions) and
-        #    optionally allow the user to override the suggested action.
-        best_action_idx = review_step(observation_buffer,
-                                      rew0_list, frames0_list,
-                                      rew1_list, frames1_list,
-                                      best_action_idx, step_count)
+        # 2. Display for review (Shows current history & future predictions) and optionally override.
+        best_action_idx = review_step(observation_buffer, 
+                                    rew0_list, frames0_list, 
+                                    rew1_list, frames1_list, 
+                                    best_action_idx, step_count)
 
         # 3. Apply chosen action
         print(f"  Applying Action Index: {best_action_idx} (Value: {DISCRETE_ACTIONS_VALUES[best_action_idx]:.1f})")

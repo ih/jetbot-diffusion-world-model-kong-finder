@@ -7,7 +7,7 @@
 
 
 
-# In[ ]:
+# In[1]:
 
 
 # 
@@ -19,7 +19,7 @@
 # get_ipython().system('pip install --upgrade typing_extensions')
 
 
-# In[ ]:
+# In[2]:
 
 
 import torch
@@ -38,13 +38,13 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Any 
 import random
 from torch.optim.lr_scheduler import LambdaLR
+import copy # Make sure to import copy at the top of the file
 
 import wandb # Will be initialized in _main_training
 
 # Your project's specific imports
 import config # Your config.py
 import models # Your models.py (which should import from diamond_models.ipynb)
-import copy # Make sure to import copy at the top of the file
 
 # Import dataset from your jetbot_dataset.ipynb
 from importnb import Notebook
@@ -62,7 +62,7 @@ DM_IMG_CHANNELS = getattr(config, 'DM_IMG_CHANNELS', 3)
 DM_NUM_ACTIONS = getattr(config, 'DM_NUM_ACTIONS', 2)
 
 
-# In[ ]:
+# In[3]:
 
 
 def split_dataset():
@@ -96,7 +96,7 @@ def split_dataset():
     return train_dataset, val_dataset
 
 
-# In[ ]:
+# In[4]:
 
 
 def tensor_to_pil(tensor_img):
@@ -203,7 +203,7 @@ def prepare_single_sample_for_sampler(sample_data, device):
 print("Visualization helpers defined.")
 
 
-# In[ ]:
+# In[5]:
 
 
 def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total, train_step_start=0):
@@ -360,7 +360,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         warmup = config.LEARNING_RATE_WARMUP_STEPS
         return float(step) / float(max(1, warmup)) if step < warmup else 1.0
     scheduler = LambdaLR(opt, lr_lambda)
-
+    
     # --- Robust Early Stopping & Checkpointing Setup ---
     best_val_loss = float('inf')
     steps_since_last_improvement = 0
@@ -368,7 +368,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
 
     validate_every = getattr(config, 'VALIDATE_EVERY', 50)
     patience_steps = getattr(config, 'EARLY_STOP_PATIENCE_STEPS', 150)
-
+    
     # Divergence Guard Setup
     divergence_patience = getattr(config, 'TRAIN_DIVERGE_PATIENCE_CHECKS', 3)
     divergence_threshold = getattr(config, 'TRAIN_DIVERGE_THRESHOLD', 0.05)
@@ -402,7 +402,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         val_stopped_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=0.0)
         moving_action_val_vis_inc = getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
-
+    
     for step in pbar:
         # --- Standard Training Step (remains the same) ---
         # (Batch creation, forward pass, backward pass, optimizer step)
@@ -442,7 +442,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             )
 
         denoiser.train()
-        loss, logs = denoiser(current_batch_obj)
+        loss, logs = denoiser(current_batch_obj) 
         train_loss_val = loss.item()
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
@@ -463,7 +463,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 "incremental_step_learning_rate": scheduler.get_last_lr()[0],
                 "train_step": train_step_count,
             })
-
+        
         # --- Validation, Early Stopping, and Divergence Check ---
         if (step + 1) % validate_every == 0 or (step + 1) == num_steps:
             val_step_start = val_step_count
@@ -474,7 +474,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             # Log validation loss
             if wandb.run:
                 wandb.log({"incremental_eval_val_loss": current_val_loss, "val_step": val_step_start})
-
+            
             # Image Sampling (similar to _main_training, simplified for step-based)
             # Tied to validation frequency for now.
             if wandb.run and hasattr(config, 'SAMPLE_EVERY') and (step + 1) % config.SAMPLE_EVERY == 0 :
@@ -541,7 +541,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 pbar.set_description(f"New best val_loss: {best_val_loss:.4f}")
             else:
                 steps_since_last_improvement += validate_every
-
+            
             # Check for training loss divergence
             if train_loss_val > last_train_loss * (1 + divergence_threshold):
                 divergence_counter += 1
@@ -554,7 +554,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 print(f"🛑 Early stopping triggered: No improvement in {patience_steps} steps.")
                 if wandb.run: wandb.log({"early_stop_reason": "patience_met", "early_stop_step": step + 1})
                 break
-
+            
             if divergence_counter >= divergence_patience:
                 print(f"🛑 Early stopping triggered: Training loss diverged for {divergence_patience} checks.")
                 if wandb.run: wandb.log({"early_stop_reason": "loss_diverged", "early_stop_step": step + 1})
@@ -568,7 +568,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     if best_model_state_dict:
         print(f"✅ Restoring model to best validation loss: {best_val_loss:.4f}")
         denoiser.load_state_dict(best_model_state_dict)
-
+    
     # Save the final, best model for promotion testing
     final_best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
     torch.save({"model_state_dict": denoiser.state_dict(), 'step': step + 1, 'val_loss': best_val_loss}, final_best_path)
@@ -576,7 +576,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     return final_best_path
 
 
-# In[ ]:
+# In[6]:
 
 
 def _main_training(finetune_checkpoint: str | None = None):
@@ -723,15 +723,14 @@ def _main_training(finetune_checkpoint: str | None = None):
         print(f"Finetuning from checkpoint: {finetune_checkpoint}")
         if os.path.exists(finetune_checkpoint):
             ckpt = torch.load(finetune_checkpoint, map_location=DEVICE)
-            if 'model_state_dict' in ckpt:
-                denoiser.load_state_dict(ckpt['model_state_dict'])
+            if "model_state_dict" in ckpt:
+                denoiser.load_state_dict(ckpt["model_state_dict"])
                 lr_for_optimizer = LEARNING_RATE / 5
                 print(f"Loaded weights for fine-tuning. LR set to {lr_for_optimizer}")
             else:
                 print(f"Warning: no model_state_dict in {finetune_checkpoint}. Starting fresh")
         else:
             print(f"Warning: finetune checkpoint {finetune_checkpoint} not found. Starting fresh")
-
     optimizer = torch.optim.AdamW(
         denoiser.parameters(), lr=lr_for_optimizer,
         weight_decay=config.LEARNING_RATE_WEIGHT_DECAY, eps=config.LEARNING_RATE_EPS
@@ -765,10 +764,10 @@ def _main_training(finetune_checkpoint: str | None = None):
             print(f"Loading checkpoint for _main_training from: {load_path_main}")
             try:
                 checkpoint = torch.load(load_path_main, map_location=DEVICE)
-                denoiser.load_state_dict(checkpoint['model_state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                START_EPOCH = checkpoint.get('epoch', 0) + 1
-                BEST_VAL_LOSS_MA_FROM_CKPT = checkpoint.get('best_val_loss_ma', float('inf'))
+                denoiser.load_state_dict(checkpoint["model_state_dict"])
+                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                START_EPOCH = checkpoint.get("epoch", 0) + 1
+                BEST_VAL_LOSS_MA_FROM_CKPT = checkpoint.get("best_val_loss_ma", float("inf"))
                 if load_path_main.endswith("denoiser_model_best_val_loss.pth"):
                     PREVIOUS_BEST_VAL_MODEL_PATH = load_path_main
                 print(f"Resuming _main_training from epoch {START_EPOCH}.")
@@ -777,10 +776,9 @@ def _main_training(finetune_checkpoint: str | None = None):
                 START_EPOCH = 0
         else:
             print("No checkpoint found or specified for _main_training. Starting fresh.")
-
     train_dataset, val_dataset = split_dataset()
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=8, pin_memory=True, drop_last=False)
+    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=False, drop_last=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=False, drop_last=False)
     print(f"Training dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
     
     val_stopped_subset, val_moving_subset = [], []
@@ -806,10 +804,9 @@ def _main_training(finetune_checkpoint: str | None = None):
     final_epoch_completed = START_EPOCH - 1
     num_train_batches = len(train_dataloader)
     num_val_batches = len(val_dataloader)
-
+    
     train_step_count = 0
     val_step_count = 0
-
     for epoch in range(START_EPOCH, NUM_EPOCHS):
         epoch_start_time = time.time()
         current_epoch_num_for_log = epoch + 1
@@ -892,8 +889,6 @@ def _main_training(finetune_checkpoint: str | None = None):
                 if epochs_without_improvement_val >= EARLY_STOPPING_PATIENCE:
                     should_stop_early = True
                     print("Early stopping triggered due to validation loss stagnation.")
-    
-        
         if (current_epoch_num_for_log % SAVE_MODEL_EVERY == 0) or (epoch == NUM_EPOCHS - 1):
             is_best_this_epoch = current_val_moving_avg == best_val_loss_ma
             # Avoid saving regular checkpoint if it's also the best_val_loss epoch to prevent duplicate saves
@@ -901,7 +896,8 @@ def _main_training(finetune_checkpoint: str | None = None):
                  torch.save({
                     'epoch': epoch, 'model_state_dict': denoiser.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(), 'loss': avg_train_loss,
-                    'val_loss': avg_val_loss, 'best_val_loss_ma': best_val_loss_ma
+                    'val_loss': avg_val_loss,
+                    'best_val_loss_ma': best_val_loss_ma
                 }, os.path.join(config.CHECKPOINT_DIR, f"denoiser_model_epoch_{current_epoch_num_for_log:04d}.pth"))
                  print(f"Saved model checkpoint at epoch {current_epoch_num_for_log}")
         
@@ -1070,7 +1066,7 @@ def _main_training(finetune_checkpoint: str | None = None):
     print("Wandb run finished.")
 
 
-# In[ ]:
+# In[7]:
 
 
 if __name__ == '__main__':

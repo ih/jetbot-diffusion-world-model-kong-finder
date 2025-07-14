@@ -457,10 +457,11 @@ if __name__ == "__main__":
     # display_dataset_entry(test_dataset[40])
 
 
-# In[8]:
+# In[6]:
 
 
-#move_transition_dataset = filter_dataset_action_prev_zero(dataset)
+# move_transition_dataset = filter_dataset_action_prev_zero(dataset)
+# move_dataset = filter_dataset_by_action(dataset, target_actions=.13)
 
 
 # print(len(dataset))
@@ -471,10 +472,17 @@ if __name__ == "__main__":
 # print(len(train_debug_set))
 # print(len(val_debug_set))
 
-# In[10]:
+# In[8]:
 
 
-#display_dataset_entry(move_transition_dataset[150])
+# display_dataset_entry(move_transition_dataset[150])
+# display_dataset_entry(move_dataset[100])
+
+
+# In[ ]:
+
+
+
 
 
 # In[ ]:
