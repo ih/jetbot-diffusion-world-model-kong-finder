@@ -40,13 +40,13 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 64
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_5hz_DIAMOND_laundry_incremental')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
 # --- Output ---
 SAVE_MODEL_EVERY = 100
-SAMPLE_EVERY = 10
+SAMPLE_EVERY = 1
 PLOT_EVERY = 10
 SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'samples')        # Sample image directory
 PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
@@ -70,7 +70,7 @@ TRAIN_DIVERGE_PATIENCE_CHECKS = 3
 TRAIN_DIVERGE_THRESHOLD = 0.05
 
 # --- Data-rate control ----------------------------------------------------
-TARGET_HZ            = 5          # ← choose 5 or 10
+TARGET_HZ            = 2          # ← choose 5 or 10
 SOURCE_HZ            = 30         # how fast the robot actually logged
 FRAME_STRIDE         = SOURCE_HZ // TARGET_HZ   # 30→5 Hz => stride 6
 
