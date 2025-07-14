@@ -130,32 +130,35 @@ def evaluate_sampler(sampler, dataloader, device, num_prev_frames, tol=1e-6):
 # In[12]:
 
 
-import time
-dataset = JetbotDataset(config.HOLDOUT_CSV_PATH, config.HOLDOUT_DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
-print(f'Holdout dataset size: {len(dataset)}')
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-checkpoint = os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
-sampler = load_sampler(checkpoint, config.DEVICE)
-start_time = time.time()
-metrics, examples = evaluate_sampler(sampler, dataloader, config.DEVICE, config.NUM_PREV_FRAMES)
-end_time = time.time()
-evaluation_time = str(datetime.timedelta(seconds=end_time-start_time))
-print(f'Evaluation took {evaluation_time} seconds')
-metrics
+def evaluate_sampler_on_holdout():
+    import time
+    dataset = JetbotDataset(config.HOLDOUT_CSV_PATH, config.HOLDOUT_DATA_DIR, config.IMAGE_SIZE, config.NUM_PREV_FRAMES, transform=config.TRANSFORM)
+    print(f'Holdout dataset size: {len(dataset)}')
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    checkpoint = os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
+    sampler = load_sampler(checkpoint, config.DEVICE)
+    start_time = time.time()
+    metrics, examples = evaluate_sampler(sampler, dataloader, config.DEVICE, config.NUM_PREV_FRAMES)
+    end_time = time.time()
+    evaluation_time = str(datetime.timedelta(seconds=end_time-start_time))
+    print(f'Evaluation took {evaluation_time} seconds')
+    metrics
+
+    save_dir = os.path.join(config.OUTPUT_DIR, 'holdout_examples')
+    if examples['still_best']:
+        save_visualization_samples(examples['still_best']['pred'], examples['still_best']['gt'], examples['still_best']['prev'], os.path.join(save_dir, 'still_best.png'))
+    if examples['still_worst']:
+        save_visualization_samples(examples['still_worst']['pred'], examples['still_worst']['gt'], examples['still_worst']['prev'], os.path.join(save_dir, 'still_worst.png'))
+    if examples['move_best']:
+        save_visualization_samples(examples['move_best']['pred'], examples['move_best']['gt'], examples['move_best']['prev'], os.path.join(save_dir, 'move_best.png'))
+    if examples['move_worst']:
+        save_visualization_samples(examples['move_worst']['pred'], examples['move_worst']['gt'], examples['move_worst']['prev'], os.path.join(save_dir, 'move_worst.png'))
 
 
 # In[13]:
 
 
-save_dir = os.path.join(config.OUTPUT_DIR, 'holdout_examples')
-if examples['still_best']:
-    save_visualization_samples(examples['still_best']['pred'], examples['still_best']['gt'], examples['still_best']['prev'], os.path.join(save_dir, 'still_best.png'))
-if examples['still_worst']:
-    save_visualization_samples(examples['still_worst']['pred'], examples['still_worst']['gt'], examples['still_worst']['prev'], os.path.join(save_dir, 'still_worst.png'))
-if examples['move_best']:
-    save_visualization_samples(examples['move_best']['pred'], examples['move_best']['gt'], examples['move_best']['prev'], os.path.join(save_dir, 'move_best.png'))
-if examples['move_worst']:
-    save_visualization_samples(examples['move_worst']['pred'], examples['move_worst']['gt'], examples['move_worst']['prev'], os.path.join(save_dir, 'move_worst.png'))
+
 
 
 # In[ ]:
