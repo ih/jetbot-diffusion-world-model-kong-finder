@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[8]:
+# In[2]:
 
 
 import os
@@ -19,9 +19,10 @@ import models
 
 with Notebook():
     from jetbot_dataset import JetbotDataset
+import datetime
 
 
-# In[9]:
+# In[3]:
 
 
 def load_sampler(checkpoint_path, device):
@@ -57,7 +58,7 @@ def load_sampler(checkpoint_path, device):
     return models.DiffusionSampler(denoiser=denoiser, cfg=sampler_cfg)
 
 
-# In[10]:
+# In[4]:
 
 
 from PIL import Image as PILImage
@@ -96,7 +97,7 @@ def save_visualization_samples(gen, gt_current, gt_prev, save_path):
     plt.close(fig)
 
 
-# In[11]:
+# In[5]:
 
 
 def evaluate_sampler(sampler, dataloader, device, num_prev_frames, tol=1e-6):
@@ -127,7 +128,7 @@ def evaluate_sampler(sampler, dataloader, device, num_prev_frames, tol=1e-6):
     return avg_metrics, examples
 
 
-# In[12]:
+# In[6]:
 
 
 def evaluate_sampler_on_holdout():
@@ -142,27 +143,39 @@ def evaluate_sampler_on_holdout():
     end_time = time.time()
     evaluation_time = str(datetime.timedelta(seconds=end_time-start_time))
     print(f'Evaluation took {evaluation_time} seconds')
-    metrics
 
     save_dir = os.path.join(config.OUTPUT_DIR, 'holdout_examples')
+    os.makedirs(save_dir, exist_ok=True)
+
+    paths = {}
     if examples['still_best']:
-        save_visualization_samples(examples['still_best']['pred'], examples['still_best']['gt'], examples['still_best']['prev'], os.path.join(save_dir, 'still_best.png'))
+        print("BEST STILL")
+        path = os.path.join(save_dir, 'still_best.png')
+        save_visualization_samples(examples['still_best']['pred'], examples['still_best']['gt'], examples['still_best']['prev'], path)
+        paths['still_best'] = path
     if examples['still_worst']:
-        save_visualization_samples(examples['still_worst']['pred'], examples['still_worst']['gt'], examples['still_worst']['prev'], os.path.join(save_dir, 'still_worst.png'))
+        print("WORST STILL")
+        path = os.path.join(save_dir, 'still_worst.png')
+        save_visualization_samples(examples['still_worst']['pred'], examples['still_worst']['gt'], examples['still_worst']['prev'], path)
+        paths['still_worst'] = path
     if examples['move_best']:
-        save_visualization_samples(examples['move_best']['pred'], examples['move_best']['gt'], examples['move_best']['prev'], os.path.join(save_dir, 'move_best.png'))
+        print("BEST MOVING")
+        path = os.path.join(save_dir, 'move_best.png')
+        save_visualization_samples(examples['move_best']['pred'], examples['move_best']['gt'], examples['move_best']['prev'], path)
+        paths['move_best'] = path
     if examples['move_worst']:
-        save_visualization_samples(examples['move_worst']['pred'], examples['move_worst']['gt'], examples['move_worst']['prev'], os.path.join(save_dir, 'move_worst.png'))
+        print("WORST MOVING")
+        path = os.path.join(save_dir, 'move_worst.png')
+        save_visualization_samples(examples['move_worst']['pred'], examples['move_worst']['gt'], examples['move_worst']['prev'], path)
+        paths['move_worst'] = path
+
+    return metrics, paths
 
 
-# In[13]:
+# In[9]:
 
 
-
-
-
-# In[ ]:
-
-
-
+if __name__ == '__main__':
+    metrics, _ = evaluate_sampler_on_holdout()
+    print(metrics)
 

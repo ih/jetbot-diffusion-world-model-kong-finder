@@ -36,13 +36,13 @@ with Notebook():
 from diamond_world_model_trainer import train_diamond_model, split_dataset
 
 
-# In[3]:
+# In[ ]:
 
 
 import models
 
 
-# In[4]:
+# In[ ]:
 
 
 MAX_HOLDOUT = 250
@@ -51,7 +51,7 @@ EPS_MSE  = 0.995   # ≥ 0.5 % relative MSE improvement
 EPS_SSIM = 0.002   # ≥ 0.002 absolute SSIM gain (~0.2 %)
 
 
-# In[5]:
+# In[ ]:
 
 
 class ReplayBuffer(Dataset):
@@ -84,7 +84,7 @@ class ReplayBuffer(Dataset):
         return [self.dataset[i] for i in idxs]
 
 
-# In[6]:
+# In[ ]:
 
 
 class MixedDataset(IterableDataset):
@@ -105,7 +105,7 @@ class MixedDataset(IterableDataset):
                 yield self.replay_buffer.sample(1)[0]
 
 
-# In[7]:
+# In[ ]:
 
 
 def build_batch(samples):
@@ -125,7 +125,7 @@ def build_batch(samples):
     return models.Batch(obs=obs, act=act_seq, mask_padding=mask, info=[{}] * b)
 
 
-# In[8]:
+# In[ ]:
 
 
 def main():
@@ -145,27 +145,33 @@ def main():
         transform=config.TRANSFORM,
     ) if os.path.exists(config.NEW_CSV_PATH) else []
 
+    print(f"Fresh dataset size is {len(fresh_ds)}.")
+
     # Use split_dataset from diamond_world_model_trainer
     train_ds, val_ds = split_dataset() # train_ds replaces full_ds, val_ds replaces val_dataset
 
     replay_ds = ReplayBuffer(train_ds, max_size=50000) # Removed index_path
 
     mixed_dataset = MixedDataset(fresh_ds, replay_ds, alpha=0.2)
+    
     train_loader = DataLoader(
         mixed_dataset,
         batch_size=config.BATCH_SIZE,
         collate_fn=build_batch,
-        pin_memory=True,
+        num_workers=4,
+        pin_memory=False,
         drop_last=True,
     )
 
     val_loader = DataLoader(
         val_ds, # Use val_ds from split_dataset
         batch_size=config.BATCH_SIZE,
+        num_workers=4,
         shuffle=False,
         collate_fn=build_batch,
-        pin_memory=True,
+        pin_memory=False,
     )
+
 
     # Step 2: train a new model starting from the last best checkpoint
     ckpt_path = os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
@@ -173,8 +179,8 @@ def main():
     new_ckpt = train_diamond_model(
         train_loader,
         val_loader,
-        start_checkpoint=ckpt_path,
-        max_steps=config.NUM_TRAIN_STEPS,
+        len(fresh_ds),
+        start_checkpoint=ckpt_path
     )
     print("Training Complete")
 
@@ -257,7 +263,7 @@ def main():
 
 
 
-# In[9]:
+# In[ ]:
 
 
 if __name__ == '__main__':
@@ -268,6 +274,12 @@ if __name__ == '__main__':
     formatted_duration = str(datetime.timedelta(seconds=duration))
     print(f"Incremental training took : {formatted_duration}")
     wandb.finish()
+
+
+# In[ ]:
+
+
+
 
 
 # In[ ]:
