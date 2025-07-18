@@ -31,6 +31,7 @@ import os
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 import time
+import logging
 import datetime # For epoch timing and timestamping
 from torchvision import transforms
 from collections import deque # For moving average
@@ -54,6 +55,11 @@ with Notebook():
 from PIL import Image as PILImage
 
 print("Imports successful.")
+
+# Basic logger setup
+logger = logging.getLogger("DiamondTrainer")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
 
 # DEVICE will be set in _main_training or used directly from config by other functions
 # Global config constants that might be used by imported functions like train_diamond_model
@@ -209,7 +215,8 @@ print("Visualization helpers defined.")
 def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total, train_step_start=0):
     denoiser_model.train()
     total_loss = 0.0
-    progress_bar = tqdm(train_dl, desc=f"Epoch {epoch_num_for_log} [Train]", leave=False)
+    train_iter = iter(train_dl)
+    progress_bar = tqdm(range(len(train_dl)), desc=f"Epoch {epoch_num_for_log} [Train]", leave=False)
 
     num_prev_frames = config.NUM_PREV_FRAMES
     c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
@@ -217,7 +224,14 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
 
     opt.zero_grad()
 
-    for batch_idx, batch in enumerate(progress_bar):
+    for batch_idx in progress_bar:
+        step_start = time.perf_counter()
+        fetch_start = step_start
+        batch = next(train_iter)
+        fetch_end = time.perf_counter()
+        fetch_time = fetch_end - fetch_start
+
+        prep_start = time.perf_counter()
         if isinstance(batch, models.Batch):
             current_batch_obj = batch.to(device)
         else:
@@ -231,20 +245,28 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
             batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
             batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
             batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
-        
+
             # Corrected Batch instantiation
             current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding, info=[{}] * current_batch_size)
+        prep_end = time.perf_counter()
+        prep_time = prep_end - prep_start
 
+        compute_start = time.perf_counter()
         loss, logs = denoiser_model(current_batch_obj)
         loss = loss / accumulation_steps
         loss.backward()
-
+        
+        opt_time = 0.0
         if (batch_idx + 1) % accumulation_steps == 0:
             if grad_clip_val > 0:
                 torch.nn.utils.clip_grad_norm_(denoiser_model.parameters(), grad_clip_val)
+            opt_step_start = time.perf_counter()
             opt.step()
             scheduler.step()
             opt.zero_grad()
+            opt_time = time.perf_counter() - opt_step_start
+        compute_end = time.perf_counter()
+        compute_time = compute_end - compute_start
 
         total_loss += loss.item() * accumulation_steps
         progress_bar.set_postfix({"Loss": loss.item() * accumulation_steps, "LR": scheduler.get_last_lr()[0]})
@@ -258,6 +280,20 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
                 "train_step": train_step,
             })
 
+        step_total = time.perf_counter() - step_start
+        logger.info(
+            f"Epoch {epoch_num_for_log} Train Step {batch_idx+1}/{len(train_dl)} - fetch:{fetch_time:.3f}s prep:{prep_time:.3f}s compute:{compute_time:.3f}s opt:{opt_time:.3f}s total:{step_total:.3f}s"
+        )
+        if batch_idx % 10 == 0:
+            wandb.log({
+                "train_fetch_time": fetch_time,
+                "train_prep_time": prep_time,
+                "train_compute_time": compute_time,
+                "train_opt_time": opt_time,
+                "train_step_total_time": step_total,
+                "train_step": train_step,
+            })
+
     avg_loss = total_loss / len(train_dl) if len(train_dl) > 0 else 0.0
     final_step = train_step_start + len(train_dl)
     return avg_loss, final_step
@@ -266,11 +302,23 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
 def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, num_train_batches_total, num_val_batches_total, val_step_start=0):
     denoiser_model.eval()
     total_loss = 0.0
-    progress_bar = tqdm(val_dl, desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
+    val_iter = iter(val_dl)
+    progress_bar = tqdm(range(len(val_dl)), desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
     num_prev_frames = config.NUM_PREV_FRAMES
     c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
 
-    for batch_idx, batch in enumerate(progress_bar):
+    for batch_idx in progress_bar:
+        step_start = time.perf_counter()
+        fetch_start = step_start
+        try:
+            batch = next(val_iter)
+        except StopIteration:
+            val_iter = iter(val_dl)
+            batch = next(val_iter)
+        fetch_end = time.perf_counter()
+        fetch_time = fetch_end - fetch_start
+
+        prep_start = time.perf_counter()
         if isinstance(batch, models.Batch):
             current_batch_obj = batch.to(device)
         else:
@@ -283,13 +331,22 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
             batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
             batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
             batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
-        
+
             # Corrected Batch instantiation
             current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding, info=[{}] * current_batch_size)
-        
+        prep_end = time.perf_counter()
+        prep_time = prep_end - prep_start
+
+        compute_start = time.perf_counter()
         loss, logs = denoiser_model(current_batch_obj)
         total_loss += loss.item()
         progress_bar.set_postfix({"Val Loss": loss.item()})
+        compute_time = time.perf_counter() - compute_start
+
+        step_total = time.perf_counter() - step_start
+        logger.info(
+            f"Epoch {epoch_num_for_log} Val Step {batch_idx+1}/{len(val_dl)} - fetch:{fetch_time:.3f}s prep:{prep_time:.3f}s compute:{compute_time:.3f}s total:{step_total:.3f}s"
+        )
         
         # Restored wandb logging
         if batch_idx % 10 == 0:
@@ -297,6 +354,14 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
             wandb.log({
                 "val_batch_loss": loss.item(),
                 "val_batch_denoising_loss": logs.get("loss_denoising"),
+                "val_step": val_step,
+            })
+        if batch_idx % 10 == 0:
+            wandb.log({
+                "val_fetch_time": fetch_time,
+                "val_prep_time": prep_time,
+                "val_compute_time": compute_time,
+                "val_step_total_time": step_total,
                 "val_step": val_step,
             })
              
@@ -404,15 +469,17 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
     
     for step in pbar:
-        # --- Standard Training Step (remains the same) ---
-        # (Batch creation, forward pass, backward pass, optimizer step)
+        step_start = time.perf_counter()
+        fetch_start = step_start
         try:
             batch = next(train_iter)
         except StopIteration:
             train_iter = iter(train_loader)
             batch = next(train_iter)
+        fetch_end = time.perf_counter()
+        fetch_time = fetch_end - fetch_start
 
-        # (Code to prepare batch object `current_batch_obj` remains the same)
+        prep_start = time.perf_counter()
         if isinstance(batch, models.Batch):
             current_batch_obj = batch.to(device)
         else:
@@ -440,20 +507,33 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 mask_padding=batch_mask_padding,
                 info=[{}] * current_batch_size
             )
+        prep_end = time.perf_counter()
+        prep_time = prep_end - prep_start
 
         denoiser.train()
-        loss, logs = denoiser(current_batch_obj) 
+        compute_start = time.perf_counter()
+        loss, logs = denoiser(current_batch_obj)
         train_loss_val = loss.item()
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
 
+        opt_time = 0.0
         if (step + 1) % config.ACCUMULATION_STEPS == 0:
             if config.GRAD_CLIP_VALUE > 0:
                 torch.nn.utils.clip_grad_norm_(denoiser.parameters(), config.GRAD_CLIP_VALUE)
+            opt_step_start = time.perf_counter()
             opt.step()
             scheduler.step()
             opt.zero_grad()
+            opt_time = time.perf_counter() - opt_step_start
+        compute_end = time.perf_counter()
+        compute_time = compute_end - compute_start
 
+        step_total = time.perf_counter() - step_start
+        logger.info(
+            f"Incremental Step {step+1}/{num_steps} - fetch:{fetch_time:.3f}s prep:{prep_time:.3f}s compute:{compute_time:.3f}s opt:{opt_time:.3f}s total:{step_total:.3f}s"
+        )
+        
         # Logging to wandb (more frequently for steps)
         train_step_count = start_step_offset + step + 1 # Define train_step_count here
         if wandb.run and (step + 1) % 10 == 0: # Log every 10 steps
@@ -462,14 +542,27 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 "incremental_step_denoising_loss": logs.get("loss_denoising"),
                 "incremental_step_learning_rate": scheduler.get_last_lr()[0],
                 "train_step": train_step_count,
+                "inc_fetch_time": fetch_time,
+                "inc_prep_time": prep_time,
+                "inc_compute_time": compute_time,
+                "inc_opt_time": opt_time,
+                "inc_step_total_time": step_total,
             })
         
         # --- Validation, Early Stopping, and Divergence Check ---
         if (step + 1) % validate_every == 0 or (step + 1) == num_steps:
             val_step_start = val_step_count
+            val_time_start = time.perf_counter()
             current_val_loss, val_step_count = validate_denoiser_epoch(
                 denoiser, val_loader, device, step + 1, 0, 0, val_step_start=val_step_start
             )
+            val_duration = time.perf_counter() - val_time_start
+            logger.info(f"Validation at step {step+1} took {val_duration:.3f}s")
+            if wandb.run:
+                wandb.log({
+                    "inc_val_duration": val_duration,
+                    "val_step": val_step_start,
+                })
 
             # Log validation loss
             if wandb.run:
@@ -478,6 +571,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
             # Image Sampling (similar to _main_training, simplified for step-based)
             # Tied to validation frequency for now.
             if wandb.run and hasattr(config, 'SAMPLE_EVERY') and (step + 1) % config.SAMPLE_EVERY == 0 :
+                sample_start = time.perf_counter()
                 denoiser.eval()
                 vis_wandb_log_data_inc = {}
                 fixed_sample_idx_inc = getattr(config, 'FIXED_VIS_SAMPLE_IDX', 0)
@@ -532,6 +626,13 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                     vis_wandb_log_data_inc["train_step"] = train_step_count # Use the same train_step_count
                     wandb.log(vis_wandb_log_data_inc)
                 denoiser.train() # Set back to train mode
+                sample_duration = time.perf_counter() - sample_start
+                logger.info(f"Sampling at step {step+1} took {sample_duration:.3f}s")
+                if wandb.run:
+                    wandb.log({
+                        "inc_sample_duration": sample_duration,
+                        "train_step": train_step_count,
+                    })
 
             # Check for improvement
             if current_val_loss < best_val_loss:
@@ -822,17 +923,20 @@ def _main_training(finetune_checkpoint: str | None = None):
         train_loss_moving_avg_q.append(avg_train_loss)
         current_train_moving_avg = sum(train_loss_moving_avg_q) / len(train_loss_moving_avg_q) if train_loss_moving_avg_q else float('inf')
     
+        val_time_start = time.perf_counter()
         avg_val_loss, val_step_count = validate_denoiser_epoch(
-            denoiser_model=denoiser, 
-            val_dl=val_dataloader, 
-            device=DEVICE, 
+            denoiser_model=denoiser,
+            val_dl=val_dataloader,
+            device=DEVICE,
             epoch_num_for_log=current_epoch_num_for_log,
-            num_train_batches_total=num_train_batches, 
+            num_train_batches_total=num_train_batches,
             num_val_batches_total=num_val_batches,
-            val_step_start=val_step_count      
+            val_step_start=val_step_count
         )
+        val_duration = time.perf_counter() - val_time_start
+        logger.info(f"Epoch {current_epoch_num_for_log} validation took {val_duration:.3f}s")
         all_val_losses_for_plot.append(avg_val_loss)
-        val_loss_moving_avg_q.append(avg_val_loss) 
+        val_loss_moving_avg_q.append(avg_val_loss)
         current_val_moving_avg = sum(val_loss_moving_avg_q) / len(val_loss_moving_avg_q) if val_loss_moving_avg_q else float('inf')
     
         epoch_duration_seconds = time.time() - epoch_start_time
@@ -850,7 +954,8 @@ def _main_training(finetune_checkpoint: str | None = None):
             "val_loss_ma": current_val_moving_avg,
             "best_val_loss_ma_so_far": best_val_loss_ma, # Log best val loss MA so far
             "epoch_duration_sec": epoch_duration_seconds,
-            "learning_rate": optimizer.param_groups[0]['lr']
+            "learning_rate": optimizer.param_groups[0]['lr'],
+            "val_duration_sec": val_duration,
         }
         
         if lr_scheduler: lr_scheduler.step(avg_val_loss if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) else None)
@@ -906,6 +1011,7 @@ def _main_training(finetune_checkpoint: str | None = None):
     
         if (current_epoch_num_for_log % SAMPLE_EVERY == 0) or (epoch == NUM_EPOCHS - 1) or should_stop_early:
             print(f"Epoch {current_epoch_num_for_log}: Generating multiple visualization samples...")
+            sample_start = time.perf_counter()
             denoiser.eval()
             vis_wandb_log_data = {} # Accumulate images here for a single wandb.log call
     
@@ -1010,9 +1116,11 @@ def _main_training(finetune_checkpoint: str | None = None):
                 print(f"  Warning: No moving (action {moving_action_val_vis}) samples found in validation set. Skipping random moving sample.")
             
             denoiser.train() # Set model back to training mode
+            sample_duration = time.perf_counter() - sample_start
+            logger.info(f"Epoch {current_epoch_num_for_log} sampling took {sample_duration:.3f}s")
             # Log all accumulated data for this epoch (losses + images)
             if wandb.run:
-                wandb.log({**wandb_log_data, **vis_wandb_log_data})
+                wandb.log({**wandb_log_data, "sample_duration_sec": sample_duration, **vis_wandb_log_data})
         elif wandb.run: # If not sampling, still log epoch metrics
              wandb.log(wandb_log_data)
     
