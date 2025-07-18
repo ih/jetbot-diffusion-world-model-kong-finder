@@ -4,12 +4,12 @@ import torchvision.transforms as transforms
 # Keep data and output in a separate directory to make uploading code to Gemini easier
 AUXILIARY_DIR = r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux'
 # --- Data ---
-SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_laundry_session_data_two_actions')
-DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
+SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_laundry_session_data_two_actions_incremental_test')
+DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions_incremental_test')
 # DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
-CSV_PATH = os.path.join(DATA_DIR, 'laundry_data_30_sessions.csv')
-NEW_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_new_data')
+CSV_PATH = os.path.join(DATA_DIR, 'laundry_data_incremental_test.csv')
+NEW_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_new_data_incremental_test')
 NEW_IMAGE_DIR = os.path.join(NEW_DATA_DIR, 'images')
 NEW_CSV_PATH = os.path.join(NEW_DATA_DIR, 'new.csv')
 REPLAY_DIR = os.path.join(AUXILIARY_DIR, 'replay_buffer')
@@ -40,7 +40,7 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 64
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_incremental_test')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
@@ -53,16 +53,13 @@ PLOT_DIR = os.path.join(OUTPUT_DIR, 'plots')          # Loss plot directory
 TEST_SAMPLE_DIR = os.path.join(OUTPUT_DIR, 'test_samples')
 SPLIT_DATASET_FILENAME = 'dataset_split.pth'
 
+# For early stopping
+MIN_EPOCHS = 20
+
 # --- Incremental Training & Early Stopping (2000-Step Run) ---
-NUM_TRAIN_STEPS = 2000
-
-# Validate every 100 steps. This gives you 20 validation points over the whole run.
-VALIDATE_EVERY = 100
-
-# Stop if there's no improvement after ~20% of the total run (400 steps).
-# This gives the model 4 validation checks to show improvement before stopping.
-EARLY_STOP_PATIENCE_STEPS = 400
-
+MIX_ALPHA = .5
+# Patience in epochs
+EARLY_STOPPING_PATIENCE = 10
 # --- Divergence Guard (These can often remain the same) ---
 # Stop if training loss increases for 3 consecutive validation checks.
 TRAIN_DIVERGE_PATIENCE_CHECKS = 3

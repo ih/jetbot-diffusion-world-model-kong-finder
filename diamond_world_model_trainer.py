@@ -22,6 +22,7 @@
 # In[2]:
 
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -308,13 +309,15 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
 print("Training and validation epoch functions adapted for Batch object and Denoiser.forward.")
 
 
-def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_steps=None):
+def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_checkpoint=None):
     """
     Train a denoiser model with robust, step-based early stopping.
     """
+    
     device = config.DEVICE
-    num_steps = max_steps or config.NUM_TRAIN_STEPS
+    print(f"Using device: {device}")
 
+    torch.backends.cudnn.benchmark = True
     # --- Model and Optimizer Setup (remains the same) ---
     inner_cfg = models.InnerModelConfig(
         img_channels=config.DM_IMG_CHANNELS,
@@ -348,6 +351,9 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
         if 'model_state_dict' in state:
             denoiser.load_state_dict(state['model_state_dict'])
         start_step_offset = state.get('step', -1)
+        print(f"Loaded from checkpoint {start_checkpoint}")
+    else:
+        print("Starting from fresh model")
 
     opt = torch.optim.AdamW(
         denoiser.parameters(),
@@ -366,9 +372,20 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     steps_since_last_improvement = 0
     best_model_state_dict = None
 
-    validate_every = getattr(config, 'VALIDATE_EVERY', 50)
-    patience_steps = getattr(config, 'EARLY_STOP_PATIENCE_STEPS', 150)
+    def round_up_to_multiple(x: int, base:int ) -> int:
+        """Smallest multiple of `base` ≥ x."""
+        return int(((x + base - 1) // base) * base)
+
+    alpha                 = config.MIX_ALPHA                             # e.g. 0.2
+    raw_steps_per_fresh_data_epoch = fresh_dataset_size / (config.BATCH_SIZE * alpha)
+    steps_per_fresh_data_epoch = round_up_to_multiple(raw_steps_per_fresh_data_epoch, config.ACCUMULATION_STEPS)
+
+    num_steps = round_up_to_multiple(steps_per_fresh_data_epoch * config.NUM_EPOCHS, config.ACCUMULATION_STEPS)
+    patience_steps = round_up_to_multiple(steps_per_fresh_data_epoch * config.EARLY_STOPPING_PATIENCE, config.ACCUMULATION_STEPS)
     
+    print(f"Incremental training for at least {patience_steps} and at most {num_steps} with {steps_per_fresh_data_epoch} number of steps per fresh data epoch")
+
+    validate_every = steps_per_fresh_data_epoch    
     # Divergence Guard Setup
     divergence_patience = getattr(config, 'TRAIN_DIVERGE_PATIENCE_CHECKS', 3)
     divergence_threshold = getattr(config, 'TRAIN_DIVERGE_THRESHOLD', 0.05)
@@ -378,6 +395,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
     # --- Training Loop ---
     val_step_count = 0
     train_iter = iter(train_loader)
+    
     pbar = tqdm(range(num_steps), desc="Incremental Training Steps")
 
     # Sampler for visualization (similar to _main_training)
@@ -541,6 +559,7 @@ def train_diamond_model(train_loader, val_loader, start_checkpoint=None, max_ste
                 pbar.set_description(f"New best val_loss: {best_val_loss:.4f}")
             else:
                 steps_since_last_improvement += validate_every
+                pbar.set_description(f"Best val_loss: {best_val_loss:.4f} Steps since last improvement: {steps_since_last_improvement}")
             
             # Check for training loss divergence
             if train_loss_val > last_train_loss * (1 + divergence_threshold):
@@ -1066,7 +1085,7 @@ def _main_training(finetune_checkpoint: str | None = None):
     print("Wandb run finished.")
 
 
-# In[7]:
+# In[ ]:
 
 
 if __name__ == '__main__':
