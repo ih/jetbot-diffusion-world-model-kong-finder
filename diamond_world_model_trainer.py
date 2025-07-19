@@ -422,13 +422,18 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
     
     for step in pbar:
-        # --- Standard Training Step (remains the same) ---
-        # (Batch creation, forward pass, backward pass, optimizer step)
+        data_fetch_time_start = time.time()
+        # --- Fetch next batch ---
         try:
             batch = next(train_iter)
         except StopIteration:
             train_iter = iter(train_loader)
             batch = next(train_iter)
+        data_fetch_duration = time.time() - data_fetch_time_start
+
+        step_time_start = time.time()
+        # --- Standard Training Step (remains the same) ---
+        # (Batch creation, forward pass, backward pass, optimizer step)
 
         # (Code to prepare batch object `current_batch_obj` remains the same)
         if isinstance(batch, models.Batch):
@@ -472,6 +477,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
             scheduler.step()
             opt.zero_grad()
 
+        step_duration = time.time() - step_time_start
         # Logging to wandb (more frequently for steps)
         train_step_count = start_step_offset + step + 1 # Define train_step_count here
         if wandb.run and (step + 1) % 10 == 0: # Log every 10 steps
@@ -479,23 +485,33 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
                 "incremental_step_train_loss": train_loss_val,
                 "incremental_step_denoising_loss": logs.get("loss_denoising"),
                 "incremental_step_learning_rate": scheduler.get_last_lr()[0],
+                "incremental_step_data_fetch_sec": data_fetch_duration,
+                "incremental_step_duration_sec": step_duration,
                 "train_step": train_step_count,
             })
         
         # --- Validation, Early Stopping, and Divergence Check ---
         if (step + 1) % validate_every == 0 or (step + 1) == num_steps:
             val_step_start = val_step_count
+            val_time_start = time.time()
             current_val_loss, val_step_count = validate_denoiser_epoch(
                 denoiser, val_loader, device, step + 1, 0, 0, val_step_start=val_step_start
             )
+            val_duration = time.time() - val_time_start
+            print(f"Validation at step {step+1} took {val_duration:.2f}s")
 
-            # Log validation loss
+            # Log validation loss and timing
             if wandb.run:
-                wandb.log({"incremental_eval_val_loss": current_val_loss, "val_step": val_step_start})
+                wandb.log({
+                    "incremental_eval_val_loss": current_val_loss,
+                    "incremental_validation_duration_sec": val_duration,
+                    "val_step": val_step_start
+                })
             
             # Image Sampling (similar to _main_training, simplified for step-based)
             # Tied to validation frequency for now.
             if wandb.run and hasattr(config, 'SAMPLE_EVERY') and (step + 1) % config.SAMPLE_EVERY == 0 :
+                sample_time_start = time.time()
                 denoiser.eval()
                 vis_wandb_log_data_inc = {}
                 fixed_sample_idx_inc = getattr(config, 'FIXED_VIS_SAMPLE_IDX', 0)
@@ -548,6 +564,9 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
                 
                 if vis_wandb_log_data_inc:
                     vis_wandb_log_data_inc["train_step"] = train_step_count # Use the same train_step_count
+                    sample_duration = time.time() - sample_time_start
+                    print(f"Sampling at step {step+1} took {sample_duration:.2f}s")
+                    vis_wandb_log_data_inc["incremental_sampling_duration_sec"] = sample_duration
                     wandb.log(vis_wandb_log_data_inc)
                 denoiser.train() # Set back to train mode
 
@@ -579,7 +598,11 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
                 if wandb.run: wandb.log({"early_stop_reason": "loss_diverged", "early_stop_step": step + 1})
                 break
 
-        pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}", "Best Val": f"{best_val_loss:.4f}", "Steps w/o Improve": f"{steps_since_last_improvement}"})
+        pbar.set_postfix({"Train Loss": f"{train_loss_val:.4f}",
+                         "Best Val": f"{best_val_loss:.4f}",
+                         "Steps w/o Improve": f"{steps_since_last_improvement}",
+                         "Fetch": f"{data_fetch_duration:.2f}s",
+                         "Step Time": f"{step_duration:.2f}s"})
 
     pbar.close()
 
@@ -841,15 +864,18 @@ def _main_training(finetune_checkpoint: str | None = None):
         train_loss_moving_avg_q.append(avg_train_loss)
         current_train_moving_avg = sum(train_loss_moving_avg_q) / len(train_loss_moving_avg_q) if train_loss_moving_avg_q else float('inf')
     
+        val_time_start = time.time()
         avg_val_loss, val_step_count = validate_denoiser_epoch(
-            denoiser_model=denoiser, 
-            val_dl=val_dataloader, 
-            device=DEVICE, 
+            denoiser_model=denoiser,
+            val_dl=val_dataloader,
+            device=DEVICE,
             epoch_num_for_log=current_epoch_num_for_log,
-            num_train_batches_total=num_train_batches, 
+            num_train_batches_total=num_train_batches,
             num_val_batches_total=num_val_batches,
-            val_step_start=val_step_count      
+            val_step_start=val_step_count
         )
+        val_duration = time.time() - val_time_start
+        print(f"Validation for epoch {current_epoch_num_for_log} took {val_duration:.2f}s")
         all_val_losses_for_plot.append(avg_val_loss)
         val_loss_moving_avg_q.append(avg_val_loss) 
         current_val_moving_avg = sum(val_loss_moving_avg_q) / len(val_loss_moving_avg_q) if val_loss_moving_avg_q else float('inf')
@@ -869,6 +895,7 @@ def _main_training(finetune_checkpoint: str | None = None):
             "val_loss_ma": current_val_moving_avg,
             "best_val_loss_ma_so_far": best_val_loss_ma, # Log best val loss MA so far
             "epoch_duration_sec": epoch_duration_seconds,
+            "validation_duration_sec": val_duration,
             "learning_rate": optimizer.param_groups[0]['lr']
         }
         
@@ -925,6 +952,7 @@ def _main_training(finetune_checkpoint: str | None = None):
     
         if (current_epoch_num_for_log % SAMPLE_EVERY == 0) or (epoch == NUM_EPOCHS - 1) or should_stop_early:
             print(f"Epoch {current_epoch_num_for_log}: Generating multiple visualization samples...")
+            sample_time_start = time.time()
             denoiser.eval()
             vis_wandb_log_data = {} # Accumulate images here for a single wandb.log call
     
@@ -1029,9 +1057,11 @@ def _main_training(finetune_checkpoint: str | None = None):
                 print(f"  Warning: No moving (action {moving_action_val_vis}) samples found in validation set. Skipping random moving sample.")
             
             denoiser.train() # Set model back to training mode
+            sample_duration = time.time() - sample_time_start
+            print(f"Sampling for epoch {current_epoch_num_for_log} took {sample_duration:.2f}s")
             # Log all accumulated data for this epoch (losses + images)
             if wandb.run:
-                wandb.log({**wandb_log_data, **vis_wandb_log_data})
+                wandb.log({**wandb_log_data, **vis_wandb_log_data, "sampling_duration_sec": sample_duration})
         elif wandb.run: # If not sampling, still log epoch metrics
              wandb.log(wandb_log_data)
     
