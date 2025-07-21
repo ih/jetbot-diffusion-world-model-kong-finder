@@ -712,7 +712,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
 # In[6]:
 
 
-def _main_training(finetune_checkpoint: str | None = None):
+def _main_training(finetune_checkpoint: str | None = None, *, finish_run: bool = True):
     print("--- Main Training Execution --- ")
 
     print("--- Configuration ---")
@@ -805,8 +805,13 @@ def _main_training(finetune_checkpoint: str | None = None):
         'FIXED_VIS_SAMPLE_IDX': getattr(config, 'FIXED_VIS_SAMPLE_IDX', 0),
         'MOVING_ACTION_VALUE_FOR_VIS': getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
     }
-    wandb.init(project=wandb_config['PROJECT_NAME'], config=wandb_config)
-    print("Wandb initialized for _main_training.")
+    started_run = False
+    if wandb.run is None:
+        run = wandb.init(project=wandb_config['PROJECT_NAME'], config=wandb_config)
+        started_run = True
+        print("Wandb initialized for _main_training.")
+    else:
+        run = wandb.run
 
     print("--- Initializing Models for _main_training ---")
     try:
@@ -1202,8 +1207,11 @@ def _main_training(finetune_checkpoint: str | None = None):
     
     ### WANDB: Log final loss plot and finish run ###
     wandb.log({"final_loss_plot": wandb.Image(final_loss_plot_path, caption=f"Final Loss Plot up to Epoch {final_epoch_completed + 1}")})
-    wandb.finish()
-    print("Wandb run finished.")
+    if started_run and finish_run:
+        wandb.finish()
+        print("Wandb run finished.")
+
+    return run
 
 
 # In[7]:
