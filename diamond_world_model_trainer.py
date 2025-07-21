@@ -318,6 +318,10 @@ def train_denoiser_epoch(
                     "train_batch_loss": loss.item() * accumulation_steps,
                     "train_batch_denoising_loss": logs.get("loss_denoising"),
                     "train_step": train_step,
+                    "nonincremental_step_data_fetch_sec": data_fetch_duration,
+                    "nonincremental_step_duration_sec": step_duration,
+                    "nonincremental_fw_bw_duration": fw_bw_duration,
+                    "nonincremental_opt_sched_duration": opt_sched_duration,
                 }
             )
 
@@ -335,7 +339,7 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
     progress_bar = tqdm(val_dl, desc=f"Epoch {epoch_num_for_log} [Valid]", leave=False)
     num_prev_frames = config.NUM_PREV_FRAMES
     c, h, w = config.DM_IMG_CHANNELS, config.IMAGE_SIZE, config.IMAGE_SIZE
-
+    print("About to enter validation loop")
     for batch_idx, batch in enumerate(progress_bar):
         if isinstance(batch, models.Batch):
             current_batch_obj = batch.to(device)
@@ -352,7 +356,8 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
         
             # Corrected Batch instantiation
             current_batch_obj = models.Batch(obs=batch_obs_tensor, act=batch_act_tensor, mask_padding=batch_mask_padding, info=[{}] * current_batch_size)
-        
+
+        print(f"Sending batch {batch_idx} to denoiser")
         loss, logs = denoiser_model(current_batch_obj)
         total_loss += loss.item()
         progress_bar.set_postfix({"Val Loss": loss.item()})
@@ -491,8 +496,9 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
         perf_table = wandb.Table(
             columns=["step", "data_fetch_sec", "batch_prep_sec", "fw_bw_sec", "opt_sched_sec"]
         )
-
+    last_step = 0
     for step in pbar:
+        last_step = step
         step_time_start = time.perf_counter()
 
         # ----- Data fetch -----
@@ -570,9 +576,11 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
                 "incremental_step_learning_rate": scheduler.get_last_lr()[0],
                 "incremental_step_data_fetch_sec": data_fetch_duration,
                 "incremental_step_duration_sec": step_duration,
+                "incremental_fw_bw_duration": fw_bw_duration,
+                "incremental_opt_sched_duration": opt_sched_duration,
                 "train_step": train_step_count,
             })
-
+            
         if perf_table is not None:
             perf_table.add_data(
                 step + 1,
@@ -586,6 +594,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
         if (step + 1) % validate_every == 0 or (step + 1) == num_steps:
             val_step_start = val_step_count
             val_time_start = time.time()
+            print("About to validate")
             current_val_loss, val_step_count = validate_denoiser_epoch(
                 denoiser, val_loader, device, step + 1, 0, 0, val_step_start=val_step_start
             )
@@ -704,7 +713,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
     
     # Save the final, best model for promotion testing
     final_best_path = os.path.join(config.CHECKPOINT_DIR, "tmp_incremental_best.pth")
-    torch.save({"model_state_dict": denoiser.state_dict(), 'step': step + 1, 'val_loss': best_val_loss}, final_best_path)
+    torch.save({"model_state_dict": denoiser.state_dict(), 'step': last_step + 1, 'val_loss': best_val_loss}, final_best_path)
 
     return final_best_path
 

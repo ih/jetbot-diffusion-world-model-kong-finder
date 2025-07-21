@@ -11,23 +11,35 @@ import config
 import diamond_world_model_trainer as trainer
 import incremental_training as incremental_trainer
 import os
+import shutil
+import time
+import gc
+import torch
 
-run = wandb.init(project="timing-comparison", reinit=True)
+run = wandb.init(project='timing-comparison', reinit=True)
 
 
 # ### Run `_main_training` on non-incremental dataset
 
-# In[3]:
+# In[2]:
 
 
-import pdb
+gc.collect()
+torch.cuda.empty_cache()
 
 config.OUTPUT_DIR = os.path.join(config.AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_nonincremental_test')
 config.DATA_DIR = os.path.join(config.AUXILIARY_DIR, 'jetbot_data_two_actions_nonincremental_test')
+config.IMAGE_DIR = os.path.join(config.DATA_DIR, 'images')
+config.CSV_PATH = os.path.join(config.DATA_DIR, 'laundry_data_incremental_test.csv')
 config.NUM_EPOCHS = 1
+
+if os.path.exists(config.OUTPUT_DIR):
+    shutil.rmtree(config.OUTPUT_DIR)
+os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
+start = time.time()
 trainer_run = trainer._main_training(finish_run=False)
-pdb.set_trace()
-noninc_table = trainer_run.history[-1].get("train_epoch_perf")
+noninc_duration = time.time() - start
 wandb.finish()
 
 
@@ -36,12 +48,23 @@ wandb.finish()
 # In[ ]:
 
 
+gc.collect()
+torch.cuda.empty_cache()
+
 config.OUTPUT_DIR = os.path.join(config.AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_incremental_test')
 config.DATA_DIR = os.path.join(config.AUXILIARY_DIR, 'jetbot_data_two_actions_incremental_test')
-wandb.init(project="timing-comparison", reinit=True)
+config.IMAGE_DIR = os.path.join(config.DATA_DIR, 'images')
+config.CSV_PATH = os.path.join(config.DATA_DIR, 'laundry_data_incremental_test.csv')
+config.EARLY_STOPPING_PATIENCE = 1
 
+if os.path.exists(config.OUTPUT_DIR):
+    shutil.rmtree(config.OUTPUT_DIR)
+os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
+wandb.init(project='timing-comparison', reinit=True)
+start = time.time()
 incremental_trainer.main()
-inc_table = wandb.run.history[-1].get("incremental_perf")
+inc_duration = time.time() - start
 wandb.finish()
 
 
@@ -52,9 +75,9 @@ wandb.finish()
 
 import pandas as pd
 
-if noninc_table is not None and inc_table is not None:
-    df_non = pd.DataFrame(noninc_table.data, columns=noninc_table.columns)
-    df_inc = pd.DataFrame(inc_table.data, columns=inc_table.columns)
-    display(df_non.describe())
-    display(df_inc.describe())
+comparison_df = pd.DataFrame({
+    'run': ['non_incremental', 'incremental'],
+    'duration_sec': [noninc_duration, inc_duration]
+})
+comparison_df
 
