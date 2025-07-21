@@ -12,7 +12,7 @@ import diamond_world_model_trainer as trainer
 import incremental_training as incremental_trainer
 import os
 
-wandb.init(project='timing-comparison', reinit=True)
+run = wandb.init(project='timing-comparison', reinit=True)
 
 
 # ### Run `_main_training` on non-incremental dataset
@@ -23,8 +23,9 @@ wandb.init(project='timing-comparison', reinit=True)
 config.OUTPUT_DIR = os.path.join(config.AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_nonincremental_test')
 config.DATA_DIR = os.path.join(config.AUXILIARY_DIR, 'jetbot_data_two_actions_nonincremental_test')
 config.NUM_EPOCHS = 1
-trainer._main_training()
-noninc_table = wandb.run.history[-1].get('train_epoch_perf')
+trainer_run = trainer._main_training(finish_run=False)
+noninc_table = trainer_run.history[-1].get('train_epoch_perf')
+wandb.finish()
 
 
 # ### Run `train_diamond_model` on incremental dataset
@@ -35,8 +36,10 @@ noninc_table = wandb.run.history[-1].get('train_epoch_perf')
 config.OUTPUT_DIR = os.path.join(config.AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_incremental_test')
 config.DATA_DIR = os.path.join(config.AUXILIARY_DIR, 'jetbot_data_two_actions_incremental_test')
 
+wandb.init(project='timing-comparison', reinit=True)
 incremental_trainer.main()
 inc_table = wandb.run.history[-1].get('incremental_perf')
+wandb.finish()
 
 
 # ### Compare timings
