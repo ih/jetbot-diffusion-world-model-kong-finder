@@ -714,7 +714,6 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
 
 def _main_training(finetune_checkpoint: str | None = None, *, finish_run: bool = True):
     print("--- Main Training Execution --- ")
-
     print("--- Configuration ---")
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
@@ -805,14 +804,13 @@ def _main_training(finetune_checkpoint: str | None = None, *, finish_run: bool =
         'FIXED_VIS_SAMPLE_IDX': getattr(config, 'FIXED_VIS_SAMPLE_IDX', 0),
         'MOVING_ACTION_VALUE_FOR_VIS': getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
     }
-    started_run = False
+    started_run = False    
     if wandb.run is None:
-        run = wandb.init(project=wandb_config['PROJECT_NAME'], config=wandb_config)
+        run = wandb.init(project=wandb_config["PROJECT_NAME"], config=wandb_config)
         started_run = True
         print("Wandb initialized for _main_training.")
     else:
         run = wandb.run
-
     print("--- Initializing Models for _main_training ---")
     try:
         inner_model_config = models.InnerModelConfig(
@@ -1202,19 +1200,14 @@ def _main_training(finetune_checkpoint: str | None = None, *, finish_run: bool =
     plt.legend(); plt.grid(True)
     final_loss_plot_path = os.path.join(config.PLOT_DIR, "denoiser_final_loss_plot.png")
     plt.savefig(final_loss_plot_path)
-    # plt.show() # Usually not needed in script, but can be uncommented for interactive
-    print(f"Final loss plot saved to {final_loss_plot_path}")
-    
-    ### WANDB: Log final loss plot and finish run ###
-    wandb.log({"final_loss_plot": wandb.Image(final_loss_plot_path, caption=f"Final Loss Plot up to Epoch {final_epoch_completed + 1}")})
-    if started_run and finish_run:
+    wandb.log({"final_loss_plot": wandb.Image(final_loss_plot_path, caption=f"Final Loss Plot up to Epoch {final_epoch_completed + 1}")})    
+    if started_run and finish_run:        
         wandb.finish()
         print("Wandb run finished.")
+    return run    
 
-    return run
 
-
-# In[7]:
+# In[ ]:
 
 
 if __name__ == '__main__':
