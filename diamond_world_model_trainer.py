@@ -296,7 +296,7 @@ def train_denoiser_epoch(
 
         step_duration = time.perf_counter() - step_time_start
 
-        print(f"Batch {batch_idx} of size {len(batch)} took {step_duration} seconds")
+        # print(f"Batch {batch_idx} of size {len(batch)} took {step_duration} seconds")
         wandb.log({"step_duration": step_duration, "batch_idx": batch_idx})
 
         if perf_table is not None:
