@@ -40,6 +40,13 @@ os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 start = time.time()
 trainer_run = trainer._main_training(finish_run=False)
 noninc_duration = time.time() - start
+noninc_hist = trainer_run.history(keys=["nonincremental_fwbw_reserved"]) or {}
+noninc_peak_reserved = None
+if hasattr(noninc_hist, "__getitem__"):
+    try:
+        noninc_peak_reserved = noninc_hist["nonincremental_fwbw_reserved"].max()
+    except Exception:
+        noninc_peak_reserved = None
 wandb.finish()
 
 
@@ -61,10 +68,17 @@ if os.path.exists(config.OUTPUT_DIR):
     shutil.rmtree(config.OUTPUT_DIR)
 os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
-wandb.init(project='timing-comparison', reinit=True)
+run_inc = wandb.init(project='timing-comparison', reinit=True)
 start = time.time()
 incremental_trainer.main()
 inc_duration = time.time() - start
+inc_hist = run_inc.history(keys=["incremental_fwbw_reserved"]) or {}
+inc_peak_reserved = None
+if hasattr(inc_hist, "__getitem__"):
+    try:
+        inc_peak_reserved = inc_hist["incremental_fwbw_reserved"].max()
+    except Exception:
+        inc_peak_reserved = None
 wandb.finish()
 
 
@@ -77,7 +91,8 @@ import pandas as pd
 
 comparison_df = pd.DataFrame({
     'run': ['non_incremental', 'incremental'],
-    'duration_sec': [noninc_duration, inc_duration]
+    'duration_sec': [noninc_duration, inc_duration],
+    'peak_reserved_mb': [noninc_peak_reserved, inc_peak_reserved]
 })
 comparison_df
 
