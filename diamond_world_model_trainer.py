@@ -7,18 +7,6 @@
 
 
 
-# In[1]:
-
-
-# 
-# 
-# get_ipython().system('pip install wandb')
-
-# 
-# 
-# get_ipython().system('pip install --upgrade typing_extensions')
-
-
 # In[2]:
 
 
@@ -61,6 +49,21 @@ print("Imports successful.")
 # if they don't re-fetch from config themselves (they mostly do, but being safe).
 DM_IMG_CHANNELS = getattr(config, 'DM_IMG_CHANNELS', 3)
 DM_NUM_ACTIONS = getattr(config, 'DM_NUM_ACTIONS', 2)
+
+
+# In[ ]:
+
+
+def log_gpu_memory(stage: str):
+    """Utility to print current GPU memory usage."""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / (1024 ** 2)
+        reserved = torch.cuda.memory_reserved() / (1024 ** 2)
+        print(f"[{stage}] GPU mem alloc: {allocated:.1f} MB, reserved: {reserved:.1f} MB")
+        print(torch.cuda.memory_summary(device=None, abbreviated=False))
+        return allocated, reserved
+    else:
+        print(f"[{stage}] GPU not available")
 
 
 # In[3]:
@@ -238,7 +241,7 @@ def train_denoiser_epoch(
         )
 
     train_iter = iter(train_dl)
-
+    pre_allocated, pre_reserved = log_gpu_memory(f"Nonincremental Pre training loop")
     for batch_idx in progress_bar:
         step_time_start = time.perf_counter()
 
@@ -246,11 +249,12 @@ def train_denoiser_epoch(
         fetch_start = time.perf_counter()
         batch = next(train_iter)
         data_fetch_duration = time.perf_counter() - fetch_start
-
+        fetch_allocated, fetch_reserved = log_gpu_memory(f"Nonincremental post batch fetch")
         # ----- Batch preparation -----
         prep_start = time.perf_counter()
         if isinstance(batch, models.Batch):
             current_batch_obj = batch.to(device)
+            batch_allocated, batch_reserved = log_gpu_memory(f"Nonincremental epoch{epoch_num_for_log}_batch{batch_idx}_after_move")
         else:
             target_img_batch, action_batch, prev_frames_flat_batch = batch
             current_batch_size = target_img_batch.shape[0]
@@ -275,6 +279,7 @@ def train_denoiser_epoch(
                 mask_padding=batch_mask_padding,
                 info=[{}] * current_batch_size,
             )
+            batch_allocated, batch_reserved = log_gpu_memory(f"epoch{epoch_num_for_log}_batch{batch_idx}_after_move")
         batch_prep_duration = time.perf_counter() - prep_start
 
         # ----- Forward + backward -----
@@ -283,6 +288,7 @@ def train_denoiser_epoch(
         loss = loss / accumulation_steps
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
+        fw_bw__allocated, fw_bw_reserved = log_gpu_memory(f"Nonincremental post fw/bw")
 
         # ----- Optimizer / scheduler -----
         opt_start = time.perf_counter()
@@ -322,6 +328,14 @@ def train_denoiser_epoch(
                     "nonincremental_step_duration_sec": step_duration,
                     "nonincremental_fw_bw_duration": fw_bw_duration,
                     "nonincremental_opt_sched_duration": opt_sched_duration,
+                    "nonincremental_fwbw_allocated": fw_bw__allocated,
+                    "nonincremental_fwbw_reserved": fw_bw_reserved,
+                    "nonincremental_batch_reserved": batch_reserved,
+                    "nonincremental_batch_allocated": batch_allocated,
+                    "nonincremental_fetch_allocated": fetch_allocated, 
+                    "nonincremental_fetch_reserved": fetch_reserved,
+                    "nonincremental_pre_reserved": pre_reserved,
+                    "nonincremental_pre_allocated": pre_allocated,
                 }
             )
 
@@ -509,7 +523,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
             train_iter = iter(train_loader)
             batch = next(train_iter)
         data_fetch_duration = time.perf_counter() - fetch_start
-
+        fetch_allocated, fetch_reserved = log_gpu_memory(f"Incremental post batch fetch")
         # ----- Batch preparation -----
         prep_start = time.perf_counter()
 

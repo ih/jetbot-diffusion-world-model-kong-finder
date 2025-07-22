@@ -21,7 +21,7 @@ run = wandb.init(project='timing-comparison', reinit=True)
 
 # ### Run `_main_training` on non-incremental dataset
 
-# In[2]:
+# In[ ]:
 
 
 gc.collect()
@@ -45,7 +45,7 @@ wandb.finish()
 
 # ### Run `train_diamond_model` on incremental dataset
 
-# In[ ]:
+# In[3]:
 
 
 gc.collect()
@@ -70,7 +70,7 @@ wandb.finish()
 
 # ### Compare timings
 
-# In[ ]:
+# In[4]:
 
 
 import pandas as pd
