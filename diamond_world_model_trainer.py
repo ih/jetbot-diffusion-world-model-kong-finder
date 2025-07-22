@@ -479,6 +479,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
     # --- Training Loop ---
     val_step_count = 0
     train_iter = iter(train_loader)
+    pre_allocated, pre_reserved = log_gpu_memory("Incremental Pre training loop")
     
     pbar = tqdm(range(num_steps), desc="Incremental Training Steps")
 
@@ -558,6 +559,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
                 info=[{}] * current_batch_size
             )
 
+        batch_allocated, batch_reserved = log_gpu_memory(f"incremental_step{step}_after_move")
         batch_prep_duration = time.perf_counter() - prep_start
 
         # ----- Forward + backward -----
@@ -568,6 +570,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
+        fw_bw_allocated, fw_bw_reserved = log_gpu_memory("Incremental post fw/bw")
 
         # ----- Optimizer / scheduler -----
         opt_start = time.perf_counter()
@@ -593,6 +596,14 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
                 "incremental_fw_bw_duration": fw_bw_duration,
                 "incremental_opt_sched_duration": opt_sched_duration,
                 "train_step": train_step_count,
+                "incremental_fwbw_allocated": fw_bw_allocated,
+                "incremental_fwbw_reserved": fw_bw_reserved,
+                "incremental_batch_reserved": batch_reserved,
+                "incremental_batch_allocated": batch_allocated,
+                "incremental_fetch_allocated": fetch_allocated,
+                "incremental_fetch_reserved": fetch_reserved,
+                "incremental_pre_reserved": pre_reserved,
+                "incremental_pre_allocated": pre_allocated,
             })
             
         if perf_table is not None:
