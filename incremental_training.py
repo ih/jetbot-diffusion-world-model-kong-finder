@@ -54,55 +54,51 @@ EPS_SSIM = 0.002   # ≥ 0.002 absolute SSIM gain (~0.2 %)
 # In[ ]:
 
 
-class ReplayBuffer(Dataset):
-    """A simple replay buffer storing dataset indices in memory."""
+class MixedMapDataset(torch.utils.data.Dataset):
+    """
+    A high-performance map-style dataset that replaces the slow IterableDataset.
 
-    def __init__(self, dataset, max_size=50000):
-        self.dataset = dataset
-        self.max_size = max_size
-        # Initialize indices in memory. If dataset is large, take a random subset or the latest `max_size` items.
-        # For simplicity, taking the first `max_size` indices, assuming newer data is appended.
-        # If dataset can be shorter than max_size, list slicing handles it.
-        if len(dataset) > max_size:
-            # If you want to prioritize newest data (assuming it's at the end of `dataset` after updates):
-            # self.indices = list(range(len(dataset) - max_size, len(dataset)))
-            # Or, for random sampling from a large dataset initially:
-            # self.indices = random.sample(range(len(dataset)), max_size)
-            # Current: take the first max_size, new data added to front via add_episode
-            self.indices = list(range(max_size)) 
-        else:
-            self.indices = list(range(len(dataset)))
+    It pre-calculates a mixed-and-shuffled index mapping from a "fresh"
+    and a "replay" dataset based on a desired mixing ratio. This allows
+    the PyTorch DataLoader to use its optimized, batched fetching strategy.
+    """
+    def __init__(self, fresh_ds, replay_ds, virtual_epoch_size, fresh_ratio=0.2):
+        super().__init__()
+        self.fresh_ds = fresh_ds
+        self.replay_ds = replay_ds
+        self.virtual_epoch_size = virtual_epoch_size
+
+        num_fresh = int(virtual_epoch_size * fresh_ratio)
+
+        # If there is no fresh data, all samples will come from the replay buffer
+        if not self.fresh_ds or len(self.fresh_ds) == 0:
+            num_fresh = 0
+
+        num_replay = virtual_epoch_size - num_fresh
+
+        # Create pointers to samples: (is_fresh_bool, index_in_source_dataset)
+        # We sample with replacement to fill the desired virtual epoch size
+        fresh_pointers = []
+        if num_fresh > 0:
+            fresh_indices = np.random.choice(len(self.fresh_ds), size=num_fresh, replace=True)
+            fresh_pointers = [(True, idx) for idx in fresh_indices]
+
+        replay_indices = np.random.choice(len(self.replay_ds), size=num_replay, replace=True)
+        replay_pointers = [(False, idx) for idx in replay_indices]
+
+        # Combine and shuffle the pointers to mix the data
+        self.mapping = fresh_pointers + replay_pointers
+        np.random.shuffle(self.mapping)
 
     def __len__(self):
-        return len(self.indices)
+        return self.virtual_epoch_size
 
     def __getitem__(self, idx):
-        return self.dataset[self.indices[idx]]
-
-    def sample(self, k):
-        idxs = random.sample(self.indices, min(k, len(self.indices)))
-        return [self.dataset[i] for i in idxs]
-
-
-# In[ ]:
-
-
-class MixedDataset(IterableDataset):
-    """Yields samples from fresh data with probability ``alpha`` and from the
-    replay buffer otherwise."""
-
-    def __init__(self, fresh_ds, replay_buffer, alpha=0.2):
-        self.fresh_ds = fresh_ds
-        self.replay_buffer = replay_buffer
-        self.alpha = alpha
-
-    def __iter__(self):
-        while True:
-            if random.random() < self.alpha and len(self.fresh_ds) > 0:
-                idx = random.randint(0, len(self.fresh_ds) - 1)
-                yield self.fresh_ds[idx]
-            else:
-                yield self.replay_buffer.sample(1)[0]
+        is_fresh, source_idx = self.mapping[idx]
+        if is_fresh:
+            return self.fresh_ds[source_idx]
+        else:
+            return self.replay_ds[source_idx]
 
 
 # In[ ]:
@@ -147,26 +143,43 @@ def main():
 
     print(f"Fresh dataset size is {len(fresh_ds)}.")
 
-    # Use split_dataset from diamond_world_model_trainer
-    train_ds, val_ds = split_dataset() # train_ds replaces full_ds, val_ds replaces val_dataset
+    # --- Step 2: Set up datasets (MODIFIED) ---
+    print(f"Fresh dataset size is {len(fresh_ds)}.")
+    train_ds, val_ds = split_dataset()
 
-    replay_ds = ReplayBuffer(train_ds, max_size=50000) # Removed index_path
+    # The original replay buffer can be replaced by the training split directly
+    replay_ds = train_ds
 
-    mixed_dataset = MixedDataset(fresh_ds, replay_ds, alpha=0.2)
+    # === START: MODIFICATION TO FIX SLOWDOWN ===
 
-    log_gpu_memory("incremental_before_dataloader")
+    # 1. Define a "virtual epoch size" based on your training logic
+    # This determines how many samples are loaded before the dataloader shuffles again.
+    # A larger number is fine; 20,000 is a reasonable default.
+    VIRTUAL_EPOCH_SIZE = 20000
+
+    # 2. Create the new high-performance dataset
+    mixed_dataset = MixedMapDataset(
+        fresh_ds=fresh_ds,
+        replay_ds=replay_ds,
+        virtual_epoch_size=VIRTUAL_EPOCH_SIZE,
+        fresh_ratio=config.MIX_ALPHA  # Use MIX_ALPHA from your config
+    )
+
+    # 3. Create the DataLoader. It now uses shuffle=True because it's a map-style dataset.
     train_loader = DataLoader(
         mixed_dataset,
         batch_size=config.BATCH_SIZE,
         collate_fn=build_batch,
         num_workers=4,
         pin_memory=False,
+        shuffle=True,  # This is crucial for map-style datasets
         drop_last=True,
     )
 
+    # === END: MODIFICATION TO FIX SLOWDOWN ===
     
     val_loader = DataLoader(
-        val_ds, # Use val_ds from split_dataset
+        val_ds,
         batch_size=config.BATCH_SIZE,
         num_workers=4,
         shuffle=False,
@@ -174,15 +187,12 @@ def main():
         pin_memory=False,
     )
 
-    log_gpu_memory("incremental_after_dataloader")
-    # Step 2: train a new model starting from the last best checkpoint
-    ckpt_path = os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
-    print("Starting training")
+    # --- Step 3: Train the model (no change here) ---
     new_ckpt = train_diamond_model(
         train_loader,
         val_loader,
         len(fresh_ds),
-        start_checkpoint=ckpt_path
+        start_checkpoint=os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
     )
     print("Training Complete")
 
