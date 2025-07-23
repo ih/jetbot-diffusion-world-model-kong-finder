@@ -288,7 +288,7 @@ def train_denoiser_epoch(
         loss = loss / accumulation_steps
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
-        fw_bw_allocated, fw_bw_reserved = log_gpu_memory("Incremental post fw/bw")
+
         fw_bw__allocated, fw_bw_reserved = log_gpu_memory(f"Nonincremental post fw/bw")
 
         # ----- Optimizer / scheduler -----
@@ -486,7 +486,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
 
     # Sampler for visualization (similar to _main_training)
     sampler_cfg_vis = models.DiffusionSamplerConfig(
-        num_steps_denoising=config.SAMPLER_NUM_STEPS,
+        num_steps_denoising=15, #config.SAMPLER_NUM_STEPS,
         sigma_min=config.SAMPLER_SIGMA_MIN,
         sigma_max=config.SAMPLER_SIGMA_MAX,
         rho=config.SAMPLER_RHO,
@@ -571,7 +571,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
-
+        fw_bw_allocated, fw_bw_reserved = log_gpu_memory("Incremental post fw/bw")
         # ----- Optimizer / scheduler -----
         opt_start = time.perf_counter()
         if (step + 1) % config.ACCUMULATION_STEPS == 0:

@@ -19,37 +19,6 @@ import torch
 run = wandb.init(project='timing-comparison', reinit=True)
 
 
-# ### Run `_main_training` on non-incremental dataset
-
-# In[2]:
-
-
-gc.collect()
-torch.cuda.empty_cache()
-
-config.OUTPUT_DIR = os.path.join(config.AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_nonincremental_test')
-config.DATA_DIR = os.path.join(config.AUXILIARY_DIR, 'jetbot_data_two_actions_nonincremental_test')
-config.IMAGE_DIR = os.path.join(config.DATA_DIR, 'images')
-config.CSV_PATH = os.path.join(config.DATA_DIR, 'laundry_data_incremental_test.csv')
-config.NUM_EPOCHS = 1
-
-if os.path.exists(config.OUTPUT_DIR):
-    shutil.rmtree(config.OUTPUT_DIR)
-os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-
-start = time.time()
-trainer_run = trainer._main_training(finish_run=False)
-noninc_duration = time.time() - start
-noninc_hist = {} # trainer_run.history(keys=["nonincremental_fwbw_reserved"]) or {}
-noninc_peak_reserved = None
-if hasattr(noninc_hist, "__getitem__"):
-    try:
-        noninc_peak_reserved = noninc_hist["nonincremental_fwbw_reserved"].max()
-    except Exception:
-        noninc_peak_reserved = None
-wandb.finish()
-
-
 # ### Run `train_diamond_model` on incremental dataset
 
 # In[2]:
@@ -79,6 +48,37 @@ if hasattr(inc_hist, "__getitem__"):
         inc_peak_reserved = inc_hist["incremental_fwbw_reserved"].max()
     except Exception:
         inc_peak_reserved = None
+wandb.finish()
+
+
+# ### Run `_main_training` on non-incremental dataset
+
+# In[ ]:
+
+
+gc.collect()
+torch.cuda.empty_cache()
+
+config.OUTPUT_DIR = os.path.join(config.AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_nonincremental_test')
+config.DATA_DIR = os.path.join(config.AUXILIARY_DIR, 'jetbot_data_two_actions_nonincremental_test')
+config.IMAGE_DIR = os.path.join(config.DATA_DIR, 'images')
+config.CSV_PATH = os.path.join(config.DATA_DIR, 'laundry_data_incremental_test.csv')
+config.NUM_EPOCHS = 1
+
+if os.path.exists(config.OUTPUT_DIR):
+    shutil.rmtree(config.OUTPUT_DIR)
+os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
+start = time.time()
+trainer_run = trainer._main_training(finish_run=False)
+noninc_duration = time.time() - start
+noninc_hist = {} # trainer_run.history(keys=["nonincremental_fwbw_reserved"]) or {}
+noninc_peak_reserved = None
+if hasattr(noninc_hist, "__getitem__"):
+    try:
+        noninc_peak_reserved = noninc_hist["nonincremental_fwbw_reserved"].max()
+    except Exception:
+        noninc_peak_reserved = None
 wandb.finish()
 
 
