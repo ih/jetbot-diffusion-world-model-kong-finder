@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("IncrementalTraining")
 
 
-# In[2]:
+# In[ ]:
 
 
 import config
@@ -33,7 +33,7 @@ with Notebook():
     from jetbot_dataset import JetbotDataset
     from combine_session_data import combine_sessions_append, gather_new_sessions_only
     from compare_diamond_models import load_sampler, evaluate_models_alternating
-from diamond_world_model_trainer import train_diamond_model, split_dataset
+from diamond_world_model_trainer import train_diamond_model, split_dataset, log_gpu_memory
 
 
 # In[ ]:
@@ -153,7 +153,8 @@ def main():
     replay_ds = ReplayBuffer(train_ds, max_size=50000) # Removed index_path
 
     mixed_dataset = MixedDataset(fresh_ds, replay_ds, alpha=0.2)
-    
+
+    log_gpu_memory("incremental_before_dataloader")
     train_loader = DataLoader(
         mixed_dataset,
         batch_size=config.BATCH_SIZE,
@@ -163,6 +164,7 @@ def main():
         drop_last=True,
     )
 
+    
     val_loader = DataLoader(
         val_ds, # Use val_ds from split_dataset
         batch_size=config.BATCH_SIZE,
@@ -172,7 +174,7 @@ def main():
         pin_memory=False,
     )
 
-
+    log_gpu_memory("incremental_after_dataloader")
     # Step 2: train a new model starting from the last best checkpoint
     ckpt_path = os.path.join(config.CHECKPOINT_DIR, 'denoiser_model_best_val_loss.pth')
     print("Starting training")

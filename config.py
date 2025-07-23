@@ -5,7 +5,7 @@ import torchvision.transforms as transforms
 AUXILIARY_DIR = r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux'
 # --- Data ---
 SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_laundry_session_data_two_actions_incremental_test')
-DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions_incremental_test')
+DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions_nonincremental_test')
 # DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
 CSV_PATH = os.path.join(DATA_DIR, 'laundry_data_incremental_test.csv')
@@ -40,7 +40,7 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 64
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_incremental_test')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_nonincremental_test')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
