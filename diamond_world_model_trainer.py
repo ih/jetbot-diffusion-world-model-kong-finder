@@ -60,7 +60,7 @@ def log_gpu_memory(stage: str):
         allocated = torch.cuda.memory_allocated() / (1024 ** 2)
         reserved = torch.cuda.memory_reserved() / (1024 ** 2)
         print(f"[{stage}] GPU mem alloc: {allocated:.1f} MB, reserved: {reserved:.1f} MB")
-        print(torch.cuda.memory_summary(device=None, abbreviated=False))
+        # print(torch.cuda.memory_summary(device=None, abbreviated=False))
         return allocated, reserved
     else:
         print(f"[{stage}] GPU not available")
@@ -288,6 +288,7 @@ def train_denoiser_epoch(
         loss = loss / accumulation_steps
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
+        fw_bw_allocated, fw_bw_reserved = log_gpu_memory("Incremental post fw/bw")
         fw_bw__allocated, fw_bw_reserved = log_gpu_memory(f"Nonincremental post fw/bw")
 
         # ----- Optimizer / scheduler -----
@@ -570,7 +571,6 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
-        fw_bw_allocated, fw_bw_reserved = log_gpu_memory("Incremental post fw/bw")
 
         # ----- Optimizer / scheduler -----
         opt_start = time.perf_counter()

@@ -40,7 +40,7 @@ os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 start = time.time()
 trainer_run = trainer._main_training(finish_run=False)
 noninc_duration = time.time() - start
-noninc_hist = trainer_run.history(keys=["nonincremental_fwbw_reserved"]) or {}
+noninc_hist = {} # trainer_run.history(keys=["nonincremental_fwbw_reserved"]) or {}
 noninc_peak_reserved = None
 if hasattr(noninc_hist, "__getitem__"):
     try:
@@ -72,7 +72,7 @@ wandb.init(project='timing-comparison', reinit=True)
 start = time.time()
 incremental_trainer.main()
 inc_duration = time.time() - start
-inc_hist = run_inc.history(keys=["incremental_fwbw_reserved"]) or {}
+inc_hist = {} # run_inc.history(keys=["incremental_fwbw_reserved"]) or {}
 inc_peak_reserved = None
 if hasattr(inc_hist, "__getitem__"):
     try:
