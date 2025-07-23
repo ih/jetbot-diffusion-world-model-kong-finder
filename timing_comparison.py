@@ -21,7 +21,7 @@ run = wandb.init(project='timing-comparison', reinit=True)
 
 # ### Run `_main_training` on non-incremental dataset
 
-# In[ ]:
+# In[2]:
 
 
 gc.collect()
@@ -52,7 +52,7 @@ wandb.finish()
 
 # ### Run `train_diamond_model` on incremental dataset
 
-# In[3]:
+# In[2]:
 
 
 gc.collect()
@@ -68,7 +68,7 @@ if os.path.exists(config.OUTPUT_DIR):
     shutil.rmtree(config.OUTPUT_DIR)
 os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
-run_inc = wandb.init(project='timing-comparison', reinit=True)
+wandb.init(project='timing-comparison', reinit=True)
 start = time.time()
 incremental_trainer.main()
 inc_duration = time.time() - start
@@ -84,7 +84,7 @@ wandb.finish()
 
 # ### Compare timings
 
-# In[4]:
+# In[ ]:
 
 
 import pandas as pd
