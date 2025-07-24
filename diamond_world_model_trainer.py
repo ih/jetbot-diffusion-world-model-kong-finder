@@ -288,7 +288,6 @@ def train_denoiser_epoch(
         loss = loss / accumulation_steps
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
-        fw_bw_allocated, fw_bw_reserved = log_gpu_memory("Incremental post fw/bw")
         fw_bw__allocated, fw_bw_reserved = log_gpu_memory(f"Nonincremental post fw/bw")
 
         # ----- Optimizer / scheduler -----
@@ -571,7 +570,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
         loss = loss / config.ACCUMULATION_STEPS
         loss.backward()
         fw_bw_duration = time.perf_counter() - fw_bw_start
-
+        fw_bw_allocated, fw_bw_reserved = log_gpu_memory("Incremental post fw/bw")
         # ----- Optimizer / scheduler -----
         opt_start = time.perf_counter()
         if (step + 1) % config.ACCUMULATION_STEPS == 0:
