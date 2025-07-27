@@ -59,7 +59,7 @@ N_ACTIONS_DIM = 1 # Dimensionality (always 1 for single motor control)
 # --- Discrete Actions ---
 # We use indices 0 and 1 for planning and map them to motor values
 DISCRETE_ACTIONS_INDICES = [0, 1]
-DISCRETE_ACTIONS_VALUES = [0.0, 0.13] # Corresponds to indices [0, 1]
+DISCRETE_ACTIONS_VALUES = [0.0, config.MOVING_ACTION_VALUE] # Corresponds to indices [0, 1]
 
 # --- Real Robot Parameters ---
 REAL_ROBOT_FRAME_DELAY = 1.0 / 5.0 # Target 5 Hz (Match training TARGET_HZ if possible)

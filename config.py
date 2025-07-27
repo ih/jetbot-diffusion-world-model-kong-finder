@@ -4,12 +4,12 @@ import torchvision.transforms as transforms
 # Keep data and output in a separate directory to make uploading code to Gemini easier
 AUXILIARY_DIR = r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux'
 # --- Data ---
-SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_laundry_session_data_two_actions_incremental_test')
-DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions_incremental_test')
+SESSION_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_livingroom_session_data_single_position')
+DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions_single_position')
 # DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions')
 IMAGE_DIR = os.path.join(DATA_DIR, 'images')
-CSV_PATH = os.path.join(DATA_DIR, 'laundry_data_incremental_test.csv')
-NEW_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_new_data_incremental_test')
+CSV_PATH = os.path.join(DATA_DIR, 'livingroom_data_incremental_test.csv')
+NEW_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_new_data_single_position')
 NEW_IMAGE_DIR = os.path.join(NEW_DATA_DIR, 'images')
 NEW_CSV_PATH = os.path.join(NEW_DATA_DIR, 'new.csv')
 REPLAY_DIR = os.path.join(AUXILIARY_DIR, 'replay_buffer')
@@ -17,7 +17,7 @@ REPLAY_INDEX_PATH = os.path.join(REPLAY_DIR, 'index.pkl')
 IMAGE_SIZE = 64
 NUM_PREV_FRAMES = 4
 MANUAL_COLLECTED_REWARD_CSV = os.path.join(DATA_DIR, "interactive_reward_labels_subset.csv")
-
+MOVING_ACTION_VALUE = .15
 # --- Paths for Model Comparison ---
 HOLDOUT_DATA_DIR = os.path.join(AUXILIARY_DIR, 'jetbot_data_two_actions_holdout')
 
@@ -40,7 +40,7 @@ BETA_END = 0.02
 USE_FP16 = True
 ACCUMULATION_STEPS = 64
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_laundry_incremental_test')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_livingroom_model_action_input_fix')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')

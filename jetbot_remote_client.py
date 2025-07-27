@@ -19,6 +19,8 @@ import torchvision.transforms as transforms
 from PIL import Image
 import random
 import config
+from tqdm.auto import tqdm
+
 
 
 # --- Setup Logging ---
@@ -130,7 +132,7 @@ def record_data(jetbot, actions, target_fps, session_dir):
         target_interval = 1.0 / target_fps
         image_count = 0 # Counter *within* the session
 
-        for action, duration in actions:
+        for action_idx, (action, duration) in enumerate(tqdm(actions, desc="Actions", unit="action")):
             # print(f"  Starting action: {action} for duration: {duration:.2f}s")
             jetbot.set_motors(action, 0)
             start_time = time.time()
@@ -168,7 +170,7 @@ def record_data(jetbot, actions, target_fps, session_dir):
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 
-            print(f"  Finished action: {action}")
+            # print(f"  Finished action: {action}")
 
     print(f"Session recording complete. Total images in session: {image_count}")
 

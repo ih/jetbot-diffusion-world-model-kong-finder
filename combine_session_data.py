@@ -214,7 +214,7 @@ def gather_new_sessions_only(session_base_dir, processed_csv_path, new_image_dir
 #     r'C:\Projects\jetbot-diffusion-world-model-kong-finder-aux\jetbot_data_two_actions_holdout\holdout.csv'
 # )
 
-# In[4]:
+# In[ ]:
 
 
 if __name__ == '__main__':

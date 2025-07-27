@@ -230,7 +230,9 @@ def train_denoiser_epoch(denoiser_model, train_dl, opt, scheduler, grad_clip_val
 
             prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
             batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
-            batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
+            # see https://chatgpt.com/share/6885abd5-d19c-8011-89da-43ccaf7ef386
+            action_indices = (action_batch > 0.0).long() # Maps 0.0 to 0 and moving action value (e.g. 0.13) to 1
+            batch_act_tensor = action_indices.repeat(1, num_prev_frames)
             batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
         
             # Corrected Batch instantiation
@@ -282,7 +284,8 @@ def validate_denoiser_epoch(denoiser_model, val_dl, device, epoch_num_for_log, n
             prev_frames_flat_batch = prev_frames_flat_batch.to(device)
             prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
             batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
-            batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()
+            action_indices = (action_batch > 0.0).long() # Maps 0.0 to 0 and 0.13 to 1
+            batch_act_tensor = action_indices.repeat(1, num_prev_frames)
             batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
         
             # Corrected Batch instantiation
@@ -418,7 +421,7 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
     if hasattr(val_loader, 'dataset') and len(val_loader.dataset) > 0:
         val_dataset_for_filter = val_loader.dataset
         val_stopped_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=0.0)
-        moving_action_val_vis_inc = getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
+        moving_action_val_vis_inc = getattr(config, 'MOVING_ACTION_VALUE', 0.15)
         val_moving_subset_inc = filter_dataset_by_action(val_dataset_for_filter, target_actions=moving_action_val_vis_inc)
     
     for step in pbar:
@@ -449,7 +452,8 @@ def train_diamond_model(train_loader, val_loader, fresh_dataset_size, start_chec
 
             prev_frames_seq_batch = prev_frames_flat_batch.view(current_batch_size, num_prev_frames, c, h, w)
             batch_obs_tensor = torch.cat((prev_frames_seq_batch, target_img_batch.unsqueeze(1)), dim=1)
-            batch_act_tensor = action_batch.repeat(1, num_prev_frames).long()  # Ensure this matches the expected action format for the model
+            action_indices = (action_batch > 0.0).long() # Maps 0.0 to 0 and 0.13 to 1
+            batch_act_tensor = action_indices.repeat(1, num_prev_frames)
             batch_mask_padding = torch.ones(current_batch_size, num_prev_frames + 1, device=device, dtype=torch.bool)
 
             current_batch_obj = models.Batch(
@@ -689,7 +693,7 @@ def _main_training(finetune_checkpoint: str | None = None):
         'NUM_PREV_FRAMES': config.NUM_PREV_FRAMES,
         'PROJECT_NAME': getattr(config, 'PROJECT_NAME', 'jetbot-diamond-world-model'),
         'FIXED_VIS_SAMPLE_IDX': getattr(config, 'FIXED_VIS_SAMPLE_IDX', 0),
-        'MOVING_ACTION_VALUE_FOR_VIS': getattr(config, 'MOVING_ACTION_VALUE_FOR_VIS', 0.13)
+        'MOVING_ACTION_VALUE_FOR_VIS': getattr(config, 'MOVING_ACTION_VALUE', 0.15)
     }
     wandb.init(project=wandb_config['PROJECT_NAME'], config=wandb_config)
     print("Wandb initialized for _main_training.")
