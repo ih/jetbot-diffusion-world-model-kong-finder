@@ -28,7 +28,7 @@ HOLDOUT_CSV_PATH = os.path.join(HOLDOUT_DATA_DIR, 'holdout.csv')
 MODEL_ARCHITECTURE = 'Denoiser' # Name matching a class in models.py
 NORM = 'batch'
 # --- Training ---
-BATCH_SIZE = 2
+BATCH_SIZE = 16
 LEARNING_RATE = 1e-4
 LEARNING_RATE_WEIGHT_DECAY = 1e-2
 LEARNING_RATE_EPS = 1e-8
@@ -38,9 +38,9 @@ NUM_TIMESTEPS = 1000
 BETA_START = 1e-4
 BETA_END = 0.02
 USE_FP16 = True
-ACCUMULATION_STEPS = 64
+ACCUMULATION_STEPS = 8
 START_EPOCH = 0
-OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_livingroom_model_action_input_fix')
+OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_2hz_DIAMOND_livingroom_model')
 # OUTPUT_DIR = os.path.join(AUXILIARY_DIR, 'output_model_small_session_split_data')
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, 'checkpoints')  # Checkpoint directory
 LOAD_CHECKPOINT = None # os.path.join(CHECKPOINT_DIR, 'model_best_epoch_62.pth')
@@ -67,7 +67,7 @@ TRAIN_DIVERGE_PATIENCE_CHECKS = 3
 TRAIN_DIVERGE_THRESHOLD = 0.05
 
 # --- Data-rate control ----------------------------------------------------
-TARGET_HZ            = 2          # ← choose 5 or 10
+TARGET_HZ            = 2         # ← choose 5 or 10
 SOURCE_HZ            = 30         # how fast the robot actually logged
 FRAME_STRIDE         = SOURCE_HZ // TARGET_HZ   # 30→5 Hz => stride 6
 
