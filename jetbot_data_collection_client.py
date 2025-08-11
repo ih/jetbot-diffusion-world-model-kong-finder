@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[101]:
+# In[5]:
 
 
 import rpyc
@@ -44,7 +44,7 @@ def move_to_new_location(jetbot, forward_time=1.0, turn_time=1.0, speed=0.15):
     time.sleep(0.5)
 
 
-# In[102]:
+# In[6]:
 
 
 # --- Configuration ---
@@ -58,13 +58,13 @@ NUM_ACTIONS = 50 #How many total actions to do
 NUM_SESSIONS = 1  # Number of times to record
 
 
-# In[103]:
+# In[7]:
 
 
 jetbot = RemoteJetBot(JETBOT_IP)
 
 
-# In[104]:
+# In[8]:
 
 
 try:

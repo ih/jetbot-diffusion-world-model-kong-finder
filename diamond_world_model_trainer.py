@@ -800,8 +800,28 @@ def _main_training(finetune_checkpoint: str | None = None):
         else:
             print("No checkpoint found or specified for _main_training. Starting fresh.")
     train_dataset, val_dataset = split_dataset()
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=False, drop_last=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=False, drop_last=False)
+
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=getattr(config, 'DATALOADER_WORKERS', 4),
+        pin_memory=getattr(config, 'PIN_MEMORY', False),
+        persistent_workers=getattr(config, 'PERSISTENT_WORKERS', False),
+        prefetch_factor=getattr(config, 'PREFETCH_FACTOR', 2),
+        drop_last=True
+    )
+
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=getattr(config, 'DATALOADER_WORKERS', 4),
+        pin_memory=getattr(config, 'PIN_MEMORY', False),
+        persistent_workers=getattr(config, 'PERSISTENT_WORKERS', False),
+        prefetch_factor=getattr(config, 'PREFETCH_FACTOR', 2),
+        drop_last=False
+    )
     print(f"Training dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
     
     val_stopped_subset, val_moving_subset = [], []
